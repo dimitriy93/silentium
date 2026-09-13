@@ -9,6 +9,7 @@ import { listLeisureForDay } from "@/actions/leisure";
 import type { LeisureEntry } from "@/lib/db/schema";
 import type { Thought } from "@/lib/db/schema";
 import { formatDateRu, formatMinutes, formatWeekdayRu, todayLocalDate } from "@/lib/format";
+import OrbitalLoader from "@/components/orbital-loader";
 
 /**
  * Главный экран «Сегодня»: дата, быстрый ввод мысли, сводка Пути,
@@ -173,7 +174,7 @@ function PathCard({ path }: { path: PathDay | null }) {
   return (
     <CardShell title="Путь" href="/path">
       {n === null ? (
-        <Empty text="…" />
+        <OrbitalLoader size={26} className="py-1" />
       ) : (
         <ul className="divide-y divide-[var(--card-edge)]">
           <PathRow
@@ -262,7 +263,7 @@ function LeisureCard({ leisure }: { leisure: LeisureEntry[] | null }) {
   return (
     <CardShell title="Развлечения" href="/leisure">
       {leisure === null ? (
-        <Empty text="…" />
+        <OrbitalLoader size={26} className="py-1" />
       ) : leisure.length === 0 ? (
         <Empty text="Отвлечений не записано." />
       ) : (
@@ -301,7 +302,7 @@ function AsceticismCard({
   return (
     <CardShell title="Аскезы" href="/asceticism">
       {asceticism === null ? (
-        <Empty text="…" />
+        <OrbitalLoader size={26} className="py-1" />
       ) : active.length === 0 ? (
         <Empty text="Активных аскез нет." />
       ) : (

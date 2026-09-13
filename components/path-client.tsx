@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import OrbitalLoader from "@/components/orbital-loader";
 import {
   createCreationEntry,
   createLearningEntry,
@@ -21,10 +22,10 @@ import { todayLocalDate } from "@/lib/format";
  */
 
 const TABS = [
-  { key: "ogon", label: "Огонь", symbol: "🔥" },
-  { key: "voda", label: "Вода", symbol: "🌊" },
-  { key: "vozduh", label: "Воздух", symbol: "🌬" },
-  { key: "zemlya", label: "Земля", symbol: "🪨" },
+  { key: "ogon", symbol: "🔥", title: "Стихия Огня", subtitle: "Физическое развитие" },
+  { key: "voda", symbol: "🌊", title: "Стихия Воды", subtitle: "Питание" },
+  { key: "vozduh", symbol: "🌬", title: "Стихия Воздуха", subtitle: "Умственное развитие" },
+  { key: "zemlya", symbol: "🪨", title: "Стихия Земли", subtitle: "Созидание" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -49,32 +50,44 @@ export default function PathClient() {
 
   return (
     <div className="space-y-5">
-      {/* Вкладки стихий */}
-      <nav className="bronze-card grid grid-cols-4 gap-1 p-1.5" aria-label="Стихии Пути">
-        {TABS.map(({ key, label, symbol }) => (
+      {/* Вкладки стихий: полные названия в две строки */}
+      <nav className="bronze-card grid grid-cols-2 gap-1 p-1.5" aria-label="Стихии Пути">
+        {TABS.map(({ key, symbol, title, subtitle }) => (
           <button
             key={key}
             type="button"
             aria-current={tab === key ? "true" : undefined}
             onClick={() => setTab(key)}
             className={
-              "flex flex-col items-center gap-0.5 rounded-xl px-1 py-2 text-xs font-semibold transition-colors " +
+              "flex items-center gap-2 rounded-xl px-2.5 py-2 text-left transition-colors " +
               (tab === key
-                ? "bg-[#33271a] text-[var(--gold)]"
-                : "text-[var(--ink-secondary)] active:text-[var(--ink)]")
+                ? "bg-[var(--pill-active)]"
+                : "active:bg-[var(--pill-active)]")
             }
           >
-            <span aria-hidden="true" className="text-base">
+            <span aria-hidden="true" className="text-lg leading-none">
               {symbol}
             </span>
-            {label}
+            <span className="min-w-0">
+              <span
+                className={
+                  "block text-[13px] leading-tight font-semibold " +
+                  (tab === key ? "text-[var(--gold)]" : "text-[var(--ink)]")
+                }
+              >
+                {title}
+              </span>
+              <span className="block text-[11px] leading-tight text-[var(--ink-secondary)]">
+                {subtitle}
+              </span>
+            </span>
           </button>
         ))}
       </nav>
 
       {error ? <p className="text-sm text-[#c96a5a]">{error}</p> : null}
       {day === null ? (
-        <p className="py-8 text-center text-sm text-[var(--ink-faint)]">Читаю хронику…</p>
+        <OrbitalLoader label="Читаю хронику…" className="py-10" />
       ) : (
         <>
           {tab === "ogon" && <FireTab day={day} reload={reload} />}

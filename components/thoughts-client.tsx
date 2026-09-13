@@ -9,6 +9,7 @@ import {
 } from "@/actions/thoughts";
 import type { Thought } from "@/lib/db/schema";
 import { formatDateHeader, todayLocalDate } from "@/lib/format";
+import OrbitalLoader from "@/components/orbital-loader";
 
 /**
  * Лента мыслей: быстрый ввод сверху, группировка по датам, редактирование
@@ -115,7 +116,7 @@ export default function ThoughtsClient() {
       {error ? <p className="text-sm text-[#c96a5a]">{error}</p> : null}
 
       {thoughts === null ? (
-        <p className="py-8 text-center text-sm text-[var(--ink-faint)]">Читаю хронику…</p>
+        <OrbitalLoader label="Читаю хронику…" className="py-10" />
       ) : thoughts.length === 0 ? (
         <p className="py-8 text-center text-sm text-[var(--ink-faint)]">
           Пока тихо. Первая запись откроет хронику.

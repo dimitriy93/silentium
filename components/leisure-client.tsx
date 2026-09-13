@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createLeisureEntry, deleteLeisureEntry, listLeisureForDay } from "@/actions/leisure";
 import type { LeisureEntry } from "@/lib/db/schema";
 import { formatMinutes, todayLocalDate } from "@/lib/format";
+import OrbitalLoader from "@/components/orbital-loader";
 
 /**
  * Раздел «Развлечения» — честный учёт отдыха и отвлечений. Не система
@@ -92,7 +93,7 @@ export default function LeisureClient() {
       ) : null}
 
       {entries === null ? (
-        <p className="py-8 text-center text-sm text-[var(--ink-faint)]">Читаю хронику…</p>
+        <OrbitalLoader label="Читаю хронику…" className="py-10" />
       ) : entries.length === 0 ? (
         <p className="py-8 text-center text-sm text-[var(--ink-faint)]">
           День чист. Отдых и отвлечения не записаны.

@@ -11,6 +11,7 @@ import {
 } from "@/actions/asceticism";
 import type { Asceticism } from "@/lib/db/schema";
 import { formatDateRu, todayLocalDate } from "@/lib/format";
+import OrbitalLoader from "@/components/orbital-loader";
 
 /**
  * Раздел «Аскезы»: список правил + отметка за сегодня (выполнено / не
@@ -38,7 +39,7 @@ export default function AsceticismClient() {
       {error ? <p className="text-sm text-[#c96a5a]">{error}</p> : null}
 
       {data === null ? (
-        <p className="py-8 text-center text-sm text-[var(--ink-faint)]">Читаю хронику…</p>
+        <OrbitalLoader label="Читаю хронику…" className="py-10" />
       ) : (
         <>
           <AsceticismList data={data} reload={reload} today={today} />

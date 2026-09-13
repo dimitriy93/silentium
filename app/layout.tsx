@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 // viewport-fit=cover — обязателен для env(safe-area-inset-*) на iPhone.
 export const viewport: Viewport = {
   viewportFit: "cover",
-  themeColor: "#17110b",
+  themeColor: "#0a0f1c",
 };
 
 export default function RootLayout({

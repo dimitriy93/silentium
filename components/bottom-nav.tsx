@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const items = [
   { href: "/today", label: "Сегодня", icon: SunIcon },
@@ -15,9 +16,18 @@ const items = [
  * Нижняя навигация: фиксированная плашка с учётом safe-area.
  * Пять основных разделов; «Развлечения» и «Настройки» доступны
  * с экрана «Сегодня».
+ *
+ * Мгновенная реакция: нажатая вкладка подсвечивается сразу (pendingHref),
+ * не дожидаясь серверного рендера новой страницы; когда pathname
+ * меняется — подсветка переходит к активному разделу.
  */
 export default function BottomNav() {
   const pathname = usePathname();
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPendingHref(null);
+  }, [pathname]);
 
   return (
     <nav
@@ -27,19 +37,22 @@ export default function BottomNav() {
       <div className="stone-nav flex w-full max-w-[440px] items-stretch gap-0.5 rounded-2xl p-1.5">
         {items.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + "/");
+          const highlighted = active || pendingHref === href;
           return (
             <Link
               key={href}
               href={href}
               aria-current={active ? "page" : undefined}
+              onClick={() => setPendingHref(href)}
               className={
                 "flex min-w-[60px] flex-1 flex-col items-center gap-1 rounded-xl px-1 py-2 transition-colors " +
-                (active
-                  ? "bg-[#33271a] text-[var(--gold)]"
-                  : "text-[var(--ink-secondary)] active:text-[var(--ink)]")
+                (highlighted
+                  ? "bg-[var(--pill-active)] text-[var(--gold)]"
+                  : "text-[var(--ink-secondary)] active:text-[var(--ink)]") +
+                (pendingHref === href && !active ? " animate-pulse" : "")
               }
             >
-              <Icon active={active} />
+              <Icon active={highlighted} />
               <span className="text-[10px] leading-none font-semibold">{label}</span>
             </Link>
           );
