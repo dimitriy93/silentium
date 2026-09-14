@@ -57,7 +57,7 @@ export default function TodayClient() {
         </p>
       </header>
 
-      <AvatarRoom path={path} />
+      <AvatarRoom path={path} asceticism={asceticism} />
 
       <ThoughtsCard thoughts={thoughts} reload={reload} />
       <PathCard path={path} />
@@ -295,10 +295,20 @@ function AsceticismCard({
   today: string | null;
 }) {
   const active = asceticism?.list.filter((a) => a.isActive) ?? [];
+  /** Отметка (asceticismId + статус), запрос которой сейчас выполняется. */
+  const [pendingMark, setPendingMark] = useState<{ id: string; status: string } | null>(null);
+  const [markError, setMarkError] = useState<string | null>(null);
 
-  async function mark(id: string, status: "done" | "failed" | "none") {
-    if (!today) return;
-    await setAsceticismLog(id, today, status);
+  async function mark(id: string, status: "done" | "failed") {
+    if (!today || pendingMark) return;
+    setPendingMark({ id, status });
+    setMarkError(null);
+    const res = await setAsceticismLog(id, today, status);
+    setPendingMark(null);
+    if (!res.ok) {
+      setMarkError(res.error);
+      return;
+    }
     await reload();
   }
 
@@ -312,33 +322,52 @@ function AsceticismCard({
         <ul className="space-y-2">
           {active.map((a) => {
             const log = asceticism.logs.find((l) => l.asceticismId === a.id);
+            const pending = pendingMark !== null;
             return (
-              <li key={a.id}>
+              <li
+                key={a.id}
+                className={
+                  "rounded-2xl border p-2 transition-colors " +
+                  (log?.status === "done"
+                    ? "border-[rgba(93,122,74,0.55)] bg-[rgba(43,58,36,0.28)]"
+                    : "border-transparent")
+                }
+              >
                 <p className="mb-1 text-sm font-medium">{a.title}</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
+                    disabled={pending}
                     onClick={() => void mark(a.id, "done")}
                     className={
-                      "h-10 rounded-xl border text-sm font-semibold " +
+                      "flex h-10 items-center justify-center rounded-xl border text-sm font-semibold transition-colors " +
                       (log?.status === "done"
                         ? "border-[#5d7a4a] bg-[#2b3a24] text-[#a8c78a]"
                         : "border-[var(--card-edge)] text-[var(--ink-secondary)]")
                     }
                   >
-                    Выполнено
+                    {pendingMark?.id === a.id && pendingMark.status === "done" ? (
+                      <MarkSpinner />
+                    ) : (
+                      "Выполнено"
+                    )}
                   </button>
                   <button
                     type="button"
+                    disabled={pending}
                     onClick={() => void mark(a.id, "failed")}
                     className={
-                      "h-10 rounded-xl border text-sm font-semibold " +
+                      "flex h-10 items-center justify-center rounded-xl border text-sm font-semibold transition-colors " +
                       (log?.status === "failed"
                         ? "border-[#7a2f2a] bg-[#3a1f1c] text-[#d99a8f]"
                         : "border-[var(--card-edge)] text-[var(--ink-secondary)]")
                     }
                   >
-                    Не выполнено
+                    {pendingMark?.id === a.id && pendingMark.status === "failed" ? (
+                      <MarkSpinner />
+                    ) : (
+                      "Не выполнено"
+                    )}
                   </button>
                 </div>
               </li>
@@ -346,7 +375,18 @@ function AsceticismCard({
           })}
         </ul>
       )}
+      {markError ? <p className="mt-2 text-sm text-[#c96a5a]">{markError}</p> : null}
     </CardShell>
+  );
+}
+
+/** Компактный лоадер внутри кнопки отметки аскезы. */
+function MarkSpinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70"
+    />
   );
 }
 

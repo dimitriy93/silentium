@@ -1,22 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { pickPhrase, phrasesForScenario, type DialogScenario } from "@/lib/avatar/phrases";
+import { pickPhrase } from "@/lib/avatar/phrases";
 
 /**
  * Тайминги диалога: 2–3 с после открытия → показать 4–5 с → скрыть →
  * пауза 5 с → следующая фраза. Продолжается, пока экран смонтирован.
- * Фразы берутся из констант, без ИИ.
+ * Фразы приходят готовым массивом (сценарий по фактическим данным дня);
+ * при смене сценария пул перечитывается на следующем цикле. Без ИИ.
  */
 
 const INITIAL_DELAY_MS = 2500;
 const VISIBLE_MS = 4500;
 const HIDDEN_MS = 5000;
 
-export function useDialogue(scenario: DialogScenario): { message: string | null } {
+export function useDialogue(phrases: string[]): { message: string | null } {
   const [message, setMessage] = useState<string | null>(null);
-  const scenarioRef = useRef(scenario);
-  scenarioRef.current = scenario;
+  const phrasesRef = useRef(phrases);
+  phrasesRef.current = phrases;
 
   useEffect(() => {
     let disposed = false;
@@ -31,8 +32,7 @@ export function useDialogue(scenario: DialogScenario): { message: string | null 
     };
 
     function cycle() {
-      const phrases = phrasesForScenario(scenarioRef.current);
-      setMessage(pickPhrase(phrases, counter));
+      setMessage(pickPhrase(phrasesRef.current, counter));
       counter += 1;
       later(() => {
         setMessage(null);

@@ -119,6 +119,17 @@ body {
   background: linear-gradient(90deg, transparent, var(--card-edge), transparent);
 }
 
+/* Аскеза за день выполнена: сдержанная зелёная кромка вместо бронзовой */
+.asceticism-done {
+  border-color: rgba(93, 122, 74, 0.55) !important;
+  background:
+    linear-gradient(180deg, rgba(43, 58, 36, 0.28), rgba(18, 27, 46, 0.9)),
+    var(--card);
+}
+.asceticism-done::before {
+  background: linear-gradient(90deg, transparent, rgba(93, 122, 74, 0.6), transparent);
+}
+
 /* ---------- Орбитальный лоадер ----------
  * Три сферы движутся по круговой орбите и догоняют друг друга.
  * Только transform + opacity — плавно и дёшево для GPU.

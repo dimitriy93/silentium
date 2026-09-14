@@ -13,18 +13,27 @@ import type { AvatarState } from "@/lib/avatar/sprites";
  * (idle / walk / sit), позиция ограничена границами комнаты. Движение
  * сглаживается CSS-переходом в компоненте; здесь считается только длительность.
  *
- * Позиция — доля ширины комнаты (0..1), считается от левого края «пятна пола».
+ * Позиция — доля ширины комнаты (0..1), считается от центра спрайта.
+ * Границы передаются снаружи ({minX, maxX}): они зависят от фактического
+ * размера спрайта и ширины комнаты, поэтому измеряются в компоненте.
  * Все таймеры очищаются при размонтировании.
  */
 
 const WALK_SPEED = 0.12; // долей ширины комнаты в секунду
-const MIN_X = 0.08;
-const MAX_X = 0.92;
 const FIRST_ACTION_DELAY = 3000;
+
+export interface AvatarBounds {
+  /** Минимальная позиция центра спрайта (0..1). */
+  minX: number;
+  /** Максимальная позиция центра спрайта (0..1). */
+  maxX: number;
+}
+
+export const DEFAULT_AVATAR_BOUNDS: AvatarBounds = { minX: 0.08, maxX: 0.92 };
 
 export interface AvatarActor {
   state: AvatarState;
-  /** Позиция по горизонтали, 0..1 ширины комнаты. */
+  /** Позиция по горизонтали, 0..1 ширины комнаты (центр спрайта). */
   x: number;
   /** Длительность текущего перемещения в мс (0 — нет перемещения). */
   walkDurationMs: number;
@@ -36,10 +45,22 @@ const INITIAL: AvatarActor = {
   walkDurationMs: 0,
 };
 
-export function useAvatarBehavior(): AvatarActor {
+export function useAvatarBehavior(bounds: AvatarBounds = DEFAULT_AVATAR_BOUNDS): AvatarActor {
   const [actor, setActor] = useState<AvatarActor>(INITIAL);
   const actorRef = useRef(actor);
   actorRef.current = actor;
+  // Границы читаются из ref: изменение ширины комнаты не перезапускает цикл.
+  const boundsRef = useRef(bounds);
+  boundsRef.current = bounds;
+
+  // При изменении границ (поворот экрана, ресайз) возвращаем аватара внутрь.
+  useEffect(() => {
+    setActor((a) => {
+      const { minX, maxX } = boundsRef.current;
+      const x = Math.min(maxX, Math.max(minX, a.x));
+      return x === a.x ? a : { ...a, x };
+    });
+  }, [bounds.minX, bounds.maxX]);
 
   useEffect(() => {
     let decisionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -56,13 +77,14 @@ export function useAvatarBehavior(): AvatarActor {
     function performNext() {
       if (disposed) return;
       const current = actorRef.current;
+      const { minX, maxX } = boundsRef.current;
       const decision = decideNextAction(lastAction, walkEdge);
 
       if (decision.action === "walk" && decision.walkDelta != null) {
         const from = current.x;
         let to = from + decision.walkDelta;
-        if (to < MIN_X) to = MIN_X;
-        if (to > MAX_X) to = MAX_X;
+        if (to < minX) to = minX;
+        if (to > maxX) to = maxX;
         const distance = Math.abs(to - from);
         if (distance < 0.01) {
           walkEdge = decision.walkDelta < 0 ? "left" : "right";
@@ -75,7 +97,7 @@ export function useAvatarBehavior(): AvatarActor {
           scheduleNext(4000);
           return;
         }
-        walkEdge = to <= MIN_X ? "left" : to >= MAX_X ? "right" : null;
+        walkEdge = to <= minX ? "left" : to >= maxX ? "right" : null;
         lastAction = "walk";
         const durationMs = (distance / WALK_SPEED) * 1000;
         setActor((a) => ({

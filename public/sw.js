@@ -7,17 +7,17 @@
  *  - остальное (server actions, API): только сеть.
  * Версия кеша: при деплое менять CACHE_VERSION.
  */
-const CACHE_VERSION = "silentium-v1";
+const CACHE_VERSION = "silentium-v2";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGES_CACHE = `${CACHE_VERSION}-pages`;
 
 const PRECACHE = [
   "/icons/icon-192.png",
   "/icons/icon-512.png",
-  "/room/room_morning.png",
-  "/room/room_afternoon.png",
-  "/room/room_evening.png",
-  "/room/room_night.png",
+  "/room/room_morning.webp",
+  "/room/room_afternoon.webp",
+  "/room/room_evening.webp",
+  "/room/room_night.webp",
 ];
 
 self.addEventListener("install", (event) => {

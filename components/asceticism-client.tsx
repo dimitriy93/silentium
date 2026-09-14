@@ -104,18 +104,28 @@ function AsceticismCard({
   reload: () => Promise<void>;
   today: string | null;
 }) {
-  const [pending, setPending] = useState(false);
+  /** Отметка, запрос которой сейчас выполняется: показываем лоадер только на ней. */
+  const [pendingStatus, setPendingStatus] = useState<"done" | "failed" | "none" | null>(null);
+  const [markError, setMarkError] = useState<string | null>(null);
+  const done = log?.status === "done";
 
   async function mark(status: "done" | "failed" | "none") {
-    if (pending || !today) return;
-    setPending(true);
-    await setAsceticismLog(a.id, today, status);
-    setPending(false);
+    if (pendingStatus || !today) return;
+    setPendingStatus(status);
+    setMarkError(null);
+    const res = await setAsceticismLog(a.id, today, status);
+    setPendingStatus(null);
+    if (!res.ok) {
+      setMarkError(res.error);
+      return;
+    }
     await reload();
   }
 
   return (
-    <article className="bronze-card bronze-edge p-4">
+    <article
+      className={"bronze-card bronze-edge p-4 transition-colors " + (done ? "asceticism-done" : "")}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-[15px] font-semibold">{a.title}</h3>
@@ -133,44 +143,84 @@ function AsceticismCard({
       ) : null}
 
       {a.isActive && today ? (
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => void mark("done")}
-            className={
-              "h-11 rounded-xl border text-sm font-semibold transition-colors " +
-              (log?.status === "done"
-                ? "border-[#5d7a4a] bg-[#2b3a24] text-[#a8c78a]"
-                : "border-[var(--card-edge)] text-[var(--ink-secondary)] active:border-[#5d7a4a]")
-            }
-          >
-            Выполнено
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => void mark("failed")}
-            className={
-              "h-11 rounded-xl border text-sm font-semibold transition-colors " +
-              (log?.status === "failed"
-                ? "border-[#7a2f2a] bg-[#3a1f1c] text-[#d99a8f]"
-                : "border-[var(--card-edge)] text-[var(--ink-secondary)] active:border-[#7a2f2a]")
-            }
-          >
-            Не выполнено
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => void mark("none")}
-            className="btn-ghost h-11 text-sm font-semibold"
-          >
-            Снять
-          </button>
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            <MarkButton
+              pending={pendingStatus === "done"}
+              disabled={pendingStatus !== null}
+              selected={log?.status === "done"}
+              kind="done"
+              onClick={() => void mark("done")}
+            />
+            <MarkButton
+              pending={pendingStatus === "failed"}
+              disabled={pendingStatus !== null}
+              selected={log?.status === "failed"}
+              kind="failed"
+              onClick={() => void mark("failed")}
+            />
+            <MarkButton
+              pending={pendingStatus === "none"}
+              disabled={pendingStatus !== null}
+              selected={false}
+              kind="none"
+              onClick={() => void mark("none")}
+            />
+          </div>
+          {markError ? <p className="text-sm text-[#c96a5a]">{markError}</p> : null}
         </div>
       ) : null}
     </article>
+  );
+}
+
+const MARK_LABELS = { done: "Выполнено", failed: "Не выполнено", none: "Снять" } as const;
+
+/** Кнопка отметки: во время запроса показывает компактный лоадер вместо текста. */
+function MarkButton({
+  pending,
+  disabled,
+  selected,
+  kind,
+  onClick,
+}: {
+  pending: boolean;
+  disabled: boolean;
+  selected: boolean;
+  kind: "done" | "failed" | "none";
+  onClick: () => void;
+}) {
+  const selectedClass =
+    kind === "done"
+      ? "border-[#5d7a4a] bg-[#2b3a24] text-[#a8c78a]"
+      : kind === "failed"
+        ? "border-[#7a2f2a] bg-[#3a1f1c] text-[#d99a8f]"
+        : "";
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={
+        "flex h-11 items-center justify-center rounded-xl border text-sm font-semibold transition-colors " +
+        (kind === "none"
+          ? "btn-ghost"
+          : selected
+            ? selectedClass
+            : "border-[var(--card-edge)] text-[var(--ink-secondary)] active:border-[var(--bronze)]")
+      }
+    >
+      {pending ? <ButtonSpinner /> : MARK_LABELS[kind]}
+    </button>
+  );
+}
+
+function ButtonSpinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70"
+    />
   );
 }
 

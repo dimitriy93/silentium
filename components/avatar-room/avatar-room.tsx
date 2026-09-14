@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AvatarSprite from "@/components/avatar/avatar-sprite";
-import { useAvatarBehavior } from "@/hooks/avatar/use-avatar-behavior";
+import { useAvatarBehavior, DEFAULT_AVATAR_BOUNDS } from "@/hooks/avatar/use-avatar-behavior";
 import { useDialogue } from "@/hooks/dialog/use-dialogue";
 import { activityCountOfDay, moodForActivityCount, type Mood } from "@/lib/avatar/mood";
-import { scenarioForNow } from "@/lib/avatar/phrases";
+import {
+  EMPTY_FACTS,
+  phrasesForScenario,
+  scenarioForNow,
+  type DayFacts,
+} from "@/lib/avatar/phrases";
 import {
   preloadRoomImages,
   ROOM_IMAGES,
@@ -13,31 +18,78 @@ import {
   type RoomPeriod,
 } from "@/lib/avatar/room";
 import type { PathDay } from "@/actions/path";
+import type { AsceticismDay } from "@/actions/asceticism";
 
 /**
  * «Живая комната» — карточка-секция на экране «Сегодня».
  * Фон выбирается по локальному времени, аватар живёт по собственному
- * циклу поведения (useAvatarBehavior), настроение зависит от числа
- * записанных активностей дня, фразы — из локального диалогового движка.
+ * циклу поведения (useAvatarBehavior), настроение — точка-индикатор по
+ * числу записанных активностей, фразы — локальный диалоговый движок,
+ * опирающийся только на фактические записи дня.
  */
 
-const MOOD_STYLES: Record<Mood, { color: string; label: string }> = {
-  happy: { color: "#8fae6f", label: "спокойно и довольно" },
-  neutral: { color: "var(--bronze-bright)", label: "размышляет" },
-  concerned: { color: "#c07a6a", label: "немного обеспокоен" },
+const MOOD_COLORS: Record<Mood, string> = {
+  happy: "#8fae6f",
+  neutral: "var(--bronze-bright)",
+  concerned: "#c07a6a",
 };
+
+/** Размер спрайта в px (2× от исходных 56). Границы движения считаются от него. */
+const AVATAR_SIZE_PX = 112;
+/** Отступ спрайта от краёв комнаты, px (к половине ширины спрайта). */
+const AVATAR_EDGE_GAP_PX = 4;
+/** Вертикальная точка опоры аватара — доля высоты комнаты. */
+const AVATAR_BOTTOM = 0.14;
 
 function roomImageSrc(period: RoomPeriod): string {
   return ROOM_IMAGES[period];
 }
 
-export default function AvatarRoom({ path }: { path: PathDay | null }) {
+/** Факты дня из загруженных записей: Путь, аскезы, развлечения. */
+function dayFacts(path: PathDay | null, asceticism: AsceticismDay | null): DayFacts {
+  if (!path) return EMPTY_FACTS;
+  const done = asceticism?.logs.filter((l) => l.status === "done").length ?? 0;
+  const failed = asceticism?.logs.filter((l) => l.status === "failed").length ?? 0;
+  return {
+    trainingCount: path.training.length,
+    learningCount: path.learning.length,
+    creationCount: path.creation.length,
+    nutritionRecorded: path.nutrition != null && path.nutrition.calories != null,
+    asceticismDone: done,
+    asceticismFailed: failed,
+    // Развлечения не загружены в комнату — на «Сегодня» их карточка рядом,
+    // в диалог они пока не передаются, чтобы не утверждать лишнего.
+    leisureCount: 0,
+  };
+}
+
+export default function AvatarRoom({
+  path,
+  asceticism,
+}: {
+  path: PathDay | null;
+  asceticism: AsceticismDay | null;
+}) {
   // Период и час вычисляются только на клиенте — без рассинхрона гидратации.
   const [period, setPeriod] = useState<RoomPeriod | null>(null);
   const [hour, setHour] = useState<number | null>(null);
-  const actor = useAvatarBehavior();
+  // Аватар показываем, только когда фон комнаты загружен — иначе он
+  // «повисает» над пустой карточкой в первый кадр.
+  const [bgReady, setBgReady] = useState(false);
+  const roomRef = useRef<HTMLDivElement | null>(null);
+  // Ширина комнаты нужна для границ движения; до измерения — безопасные дефолты.
+  const [roomWidth, setRoomWidth] = useState<number | null>(null);
+
+  const facts = dayFacts(path, asceticism);
   const activityCount = path ? activityCountOfDay(path) : 0;
   const mood = moodForActivityCount(activityCount);
+  const actor = useAvatarBehavior(boundsFor(roomWidth));
+  const phrases = useMemo(() => {
+    // Час неизвестен до монтирования — берём нейтральный полдень.
+    const scenario = scenarioForNow(hour ?? 12, facts, mood);
+    return phrasesForScenario(scenario, facts);
+  }, [hour, facts, mood]);
+  const { message } = useDialogue(phrases);
 
   useEffect(() => {
     preloadRoomImages();
@@ -51,45 +103,61 @@ export default function AvatarRoom({ path }: { path: PathDay | null }) {
     return () => clearInterval(id);
   }, []);
 
-  const scenario = useMemo(() => {
-    // Час неизвестен до монтирования — берём нейтральный полдень.
-    return scenarioForNow(hour ?? 12, activityCount, mood);
-  }, [hour, activityCount, mood]);
+  // Измерение комнаты: границы движения спрайта зависят от фактической ширины.
+  useEffect(() => {
+    const el = roomRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width && width > 0) setRoomWidth(width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  const { message } = useDialogue(scenario);
+  // Пузырь следует за аватаром. Центр ограничен 30–70% ширины: при максимальной
+  // ширине пузыря 60% комнаты он гарантированно не упирается в края.
+  const bubbleLeftPct = Math.min(70, Math.max(30, actor.x * 100));
 
   return (
     <section className="bronze-card bronze-edge overflow-hidden">
-      <div className="relative w-full" style={{ aspectRatio: "765 / 509" }}>
+      <div ref={roomRef} className="relative w-full" style={{ aspectRatio: "765 / 509" }}>
         {/* Фон: два слоя для плавного кроссфейда при смене периода */}
-        <RoomBackground period={period} src={period ? roomImageSrc(period) : null} />
+        <RoomBackground
+          period={period}
+          src={period ? roomImageSrc(period) : null}
+          onTopLayerReady={setBgReady}
+        />
 
         {/* Настроение — маленькая точка-индикатор в углу комнаты */}
         <div
-          className="absolute top-3 right-3 flex items-center gap-1.5 rounded-full px-2.5 py-1"
+          className="absolute top-3 right-3 flex items-center rounded-full px-2 py-1"
           style={{ background: "rgba(10, 15, 28, 0.55)", border: "1px solid var(--card-edge)" }}
+          title="Настроение спутника"
         >
           <span
             aria-hidden="true"
             className="block h-2 w-2 rounded-full"
-            style={{ background: MOOD_STYLES[mood].color, boxShadow: `0 0 6px ${MOOD_STYLES[mood].color}` }}
+            style={{ background: MOOD_COLORS[mood], boxShadow: `0 0 6px ${MOOD_COLORS[mood]}` }}
           />
-          <span className="text-[11px] text-[var(--ink-secondary)]">Спутник</span>
         </div>
 
-        {/* Реплика спутника */}
+        {/* Реплика спутника: над головой аватара, следует за ним, не упирается в края */}
         <div
           aria-live="polite"
-          className={
-            "absolute inset-x-4 bottom-[27%] flex justify-center transition-all duration-700 " +
-            (message ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0")
-          }
+          className="absolute flex -translate-x-1/2 justify-center transition-all duration-700"
+          style={{
+            left: `${bubbleLeftPct}%`,
+            bottom: `calc(${AVATAR_BOTTOM * 100}% + ${AVATAR_SIZE_PX + 8}px)`,
+            opacity: message ? 1 : 0,
+            transform: message ? "translateY(0)" : "translateY(4px)",
+          }}
         >
           {message ? (
             <p
-              className="max-w-[85%] rounded-xl px-3.5 py-2 text-center text-[13px] leading-snug text-[var(--ink)]"
+              className="max-w-[60%] rounded-xl px-3.5 py-2 text-center text-[13px] leading-snug text-[var(--ink)]"
               style={{
-                background: "rgba(10, 15, 28, 0.82)",
+                background: "rgba(10, 15, 28, 0.74)",
                 border: "1px solid var(--card-edge)",
                 backdropFilter: "blur(6px)",
               }}
@@ -101,8 +169,9 @@ export default function AvatarRoom({ path }: { path: PathDay | null }) {
 
         {/* Аватар: перемещение сглаживает CSS-переход, длительность задаёт behavior */}
         <div
-          className="absolute bottom-[14%]"
+          className="absolute"
           style={{
+            bottom: `${AVATAR_BOTTOM * 100}%`,
             left: `${actor.x * 100}%`,
             transform: "translateX(-50%)",
             transition:
@@ -111,15 +180,44 @@ export default function AvatarRoom({ path }: { path: PathDay | null }) {
                 : "left 700ms ease",
           }}
         >
-          <AvatarSprite state={actor.state} />
+          <div
+            style={{
+              opacity: bgReady ? 1 : 0,
+              transition: "opacity 500ms ease",
+            }}
+          >
+            <AvatarSprite state={actor.state} size={AVATAR_SIZE_PX} />
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
+/**
+ * Границы движения центра спрайта: спрайт шириной S px на комнате W px
+ * не должен выходить краем за комнату, значит центр ограничен
+ * [S/2 + зазор, W − S/2 − зазор]. До измерения — прежние безопасные доли.
+ */
+function boundsFor(roomWidth: number | null) {
+  if (!roomWidth || roomWidth <= 0) return DEFAULT_AVATAR_BOUNDS;
+  const half = AVATAR_SIZE_PX / 2;
+  const insetPx = half + AVATAR_EDGE_GAP_PX;
+  const insetFraction = insetPx / roomWidth;
+  if (insetFraction * 2 >= 0.96) return DEFAULT_AVATAR_BOUNDS;
+  return { minX: insetFraction, maxX: 1 - insetFraction };
+}
+
 /** Кроссфейд фона: старый слой растворяется, новый проявляется сверху. */
-function RoomBackground({ period, src }: { period: RoomPeriod | null; src: string | null }) {
+function RoomBackground({
+  period,
+  src,
+  onTopLayerReady,
+}: {
+  period: RoomPeriod | null;
+  src: string | null;
+  onTopLayerReady?: (ready: boolean) => void;
+}) {
   const [layers, setLayers] = useState<{ src: string; opacity: number }[]>(
     src ? [{ src, opacity: 1 }] : [],
   );
@@ -136,7 +234,7 @@ function RoomBackground({ period, src }: { period: RoomPeriod | null; src: strin
 
   return (
     <>
-      {layers.map((layer) => (
+      {layers.map((layer, index) => (
         <img
           key={layer.src}
           src={layer.src}
@@ -145,6 +243,10 @@ function RoomBackground({ period, src }: { period: RoomPeriod | null; src: strin
           draggable={false}
           className="absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ease-in-out"
           style={{ opacity: layer.opacity }}
+          onLoad={() => {
+            // Верхний (активный) слой загружен — комната готова показывать аватара.
+            if (index === layers.length - 1) onTopLayerReady?.(true);
+          }}
         />
       ))}
       {/* Мягкое затемнение снизу — реплики читаются спокойнее */}
