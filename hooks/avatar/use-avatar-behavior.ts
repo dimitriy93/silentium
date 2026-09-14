@@ -53,14 +53,11 @@ export function useAvatarBehavior(bounds: AvatarBounds = DEFAULT_AVATAR_BOUNDS):
   const boundsRef = useRef(bounds);
   boundsRef.current = bounds;
 
-  // При изменении границ (поворот экрана, ресайз) возвращаем аватара внутрь.
-  useEffect(() => {
-    setActor((a) => {
-      const { minX, maxX } = boundsRef.current;
-      const x = Math.min(maxX, Math.max(minX, a.x));
-      return x === a.x ? a : { ...a, x };
-    });
-  }, [bounds.minX, bounds.maxX]);
+  // Строгое правило: координата X меняется только в состоянии WALK.
+  // Изменение границ (ресайз, поворот) поэтому НЕ двигает аватара сразу —
+  // вышедшая за край позиция подожмётся при следующей прогулке (performNext
+  // всегда зажимает цель в границы). Иначе сидящий/стоящий персонаж
+  // «проскальзывал» по комнате с CSS-переходом.
 
   useEffect(() => {
     let decisionTimer: ReturnType<typeof setTimeout> | undefined;

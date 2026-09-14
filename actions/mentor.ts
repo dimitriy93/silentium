@@ -44,11 +44,36 @@ export async function requestMentorReading(entryDate: string): Promise<Action<Me
   const cached = await getLatestMentorMessage(user.id, date);
   if (cached) return { ok: true, data: { content: cached, cached: true } };
 
+  const data = await generateAndSave(user.id, date);
+  return data.ok ? { ok: true, data: { content: data.content, cached: false } } : data;
+}
+
+/**
+ * Принудительно новый разбор дня (только по явному действию пользователя).
+ * История append-only: старое наставление не удаляется и не перезаписывается —
+ * новая запись добавляется в mentor_messages, а последняя становится текущей.
+ * Пока модель не ответила, старое сообщение остаётся в базе нетронутым.
+ */
+export async function regenerateMentorReading(entryDate: string): Promise<Action<MentorReading>> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "Требуется авторизация" };
+
+  const parsed = readingSchema.safeParse({ entryDate });
+  if (!parsed.success) return { ok: false, error: formatZodError(parsed.error) };
+
+  const data = await generateAndSave(user.id, parsed.data.entryDate);
+  return data.ok ? { ok: true, data: { content: data.content, cached: false } } : data;
+}
+
+async function generateAndSave(
+  userId: string,
+  date: string,
+): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
   // Записи дня — тот же слой данных, что читают экраны Today/истории.
   const [entries, asceticisms, systemPrompt] = await Promise.all([
-    getDayEntries(user.id, date),
-    listAsceticisms(user.id),
-    getMentorSystemPrompt(user.id),
+    getDayEntries(userId, date),
+    listAsceticisms(userId),
+    getMentorSystemPrompt(userId),
   ]);
 
   const titleMap = new Map(asceticisms.map((a) => [a.id, a.title]));
@@ -57,8 +82,8 @@ export async function requestMentorReading(entryDate: string): Promise<Action<Me
 
   try {
     const content = await generateMentorText(systemPrompt ?? DEFAULT_MENTOR_SYSTEM_PROMPT, userPrompt);
-    await saveMentorMessage(user.id, date, content);
-    return { ok: true, data: { content, cached: false } };
+    await saveMentorMessage(userId, date, content);
+    return { ok: true, content };
   } catch (error) {
     if (error instanceof GeminiError) {
       return { ok: false, error: error.userMessage };

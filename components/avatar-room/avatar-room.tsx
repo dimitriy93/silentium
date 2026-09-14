@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import AvatarSprite from "@/components/avatar/avatar-sprite";
 import { useAvatarBehavior, DEFAULT_AVATAR_BOUNDS } from "@/hooks/avatar/use-avatar-behavior";
 import { useDialogue } from "@/hooks/dialog/use-dialogue";
-import { activityCountOfDay, moodForActivityCount, type Mood } from "@/lib/avatar/mood";
+import { activityCountOfDay, moodForActivityCount } from "@/lib/avatar/mood";
 import {
   EMPTY_FACTS,
   phrasesForScenario,
@@ -23,16 +23,9 @@ import type { AsceticismDay } from "@/actions/asceticism";
 /**
  * «Живая комната» — карточка-секция на экране «Сегодня».
  * Фон выбирается по локальному времени, аватар живёт по собственному
- * циклу поведения (useAvatarBehavior), настроение — точка-индикатор по
- * числу записанных активностей, фразы — локальный диалоговый движок,
+ * циклу поведения (useAvatarBehavior), фразы — локальный диалоговый движок,
  * опирающийся только на фактические записи дня.
  */
-
-const MOOD_COLORS: Record<Mood, string> = {
-  happy: "#8fae6f",
-  neutral: "var(--bronze-bright)",
-  concerned: "#c07a6a",
-};
 
 /** Размер спрайта в px (2× от исходных 56). Границы движения считаются от него. */
 const AVATAR_SIZE_PX = 112;
@@ -115,9 +108,8 @@ export default function AvatarRoom({
     return () => observer.disconnect();
   }, []);
 
-  // Пузырь следует за аватаром. Центр ограничен 30–70% ширины: при максимальной
-  // ширине пузыря 60% комнаты он гарантированно не упирается в края.
-  const bubbleLeftPct = Math.min(70, Math.max(30, actor.x * 100));
+  // Пузырь закреплён статично в верхней центральной области комнаты и не
+  // следует за аватаром: персонаж ходит, реплика остаётся на месте.
 
   return (
     <section className="bronze-card bronze-edge overflow-hidden">
@@ -129,25 +121,12 @@ export default function AvatarRoom({
           onTopLayerReady={setBgReady}
         />
 
-        {/* Настроение — маленькая точка-индикатор в углу комнаты */}
-        <div
-          className="absolute top-3 right-3 flex items-center rounded-full px-2 py-1"
-          style={{ background: "rgba(10, 15, 28, 0.55)", border: "1px solid var(--card-edge)" }}
-          title="Настроение спутника"
-        >
-          <span
-            aria-hidden="true"
-            className="block h-2 w-2 rounded-full"
-            style={{ background: MOOD_COLORS[mood], boxShadow: `0 0 6px ${MOOD_COLORS[mood]}` }}
-          />
-        </div>
-
-        {/* Реплика спутника: над головой аватара, следует за ним, не упирается в края */}
+        {/* Реплика спутника: фиксированная позиция комнаты, без привязки к аватару */}
         <div
           aria-live="polite"
-          className="absolute flex -translate-x-1/2 justify-center transition-all duration-700"
+          className="absolute flex -translate-x-1/2 justify-center transition-[opacity,transform] duration-700"
           style={{
-            left: `${bubbleLeftPct}%`,
+            left: "50%",
             bottom: `calc(${AVATAR_BOTTOM * 100}% + ${AVATAR_SIZE_PX + 8}px)`,
             opacity: message ? 1 : 0,
             transform: message ? "translateY(0)" : "translateY(4px)",
@@ -167,7 +146,9 @@ export default function AvatarRoom({
           ) : null}
         </div>
 
-        {/* Аватар: перемещение сглаживает CSS-переход, длительность задаёт behavior */}
+        {/* Аватар: перемещение сглаживает CSS-переход, длительность задаёт behavior.
+            Переход на left включается ТОЛЬКО в состоянии WALK — сидя и в idle
+            позиция не анимируется в принципе. */}
         <div
           className="absolute"
           style={{
@@ -175,9 +156,9 @@ export default function AvatarRoom({
             left: `${actor.x * 100}%`,
             transform: "translateX(-50%)",
             transition:
-              actor.walkDurationMs > 0
+              actor.state.kind === "WALK" && actor.walkDurationMs > 0
                 ? `left ${actor.walkDurationMs}ms linear`
-                : "left 700ms ease",
+                : undefined,
           }}
         >
           <div

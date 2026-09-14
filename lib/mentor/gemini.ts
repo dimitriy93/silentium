@@ -72,7 +72,10 @@ async function requestModel(
           contents: [{ role: "user", parts: [{ text: userPrompt }] }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 1024,
+            // В budget входят и «thinking»-токены flash-моделей: 1024 обрезало
+            // ответ посреди предложения (finishReason MAX_TOKENS). 4096 —
+            // запас для компактного, но законченного разбора дня.
+            maxOutputTokens: 4096,
           },
         }),
         signal: controller.signal,
@@ -147,12 +150,38 @@ function extractText(payload: GeminiResponse | undefined): string {
   if (payload?.promptFeedback?.blockReason) {
     throw new GeminiError("Наставник воздержался от ответа на эти записи.");
   }
-  const text = (payload?.candidates?.[0]?.content?.parts ?? [])
+  const candidate = payload?.candidates?.[0];
+  const text = (candidate?.content?.parts ?? [])
     .map((part) => part.text ?? "")
     .join("")
     .trim();
   if (text.length === 0) {
     throw new GeminiError("Наставник ответил пустотой. Попробуй ещё раз.");
   }
-  return text;
+  // Обрыв по лимиту не показываем пользователю: незаконченное предложение —
+  // хуже ошибки, которую можно повторить. Лимит поднят, так что это редкость.
+  if (candidate?.finishReason === "MAX_TOKENS") {
+    throw new GeminiError(
+      "Наставник не успел закончить разбор. Попробуй запросить наставление ещё раз.",
+    );
+  }
+  return sanitizeMentorText(text);
+}
+
+/**
+ * Защита от случайного Markdown в ответе модели: убираем **, __, ###-маркеры
+ * и строку-заголовок «Выжимка дня», если модель её всё же вернула. Текст
+ * остаётся обычным читаемым текстом — без HTML-рендера.
+ */
+export function sanitizeMentorText(raw: string): string {
+  const lines = raw
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/__(.+?)__/g, "$1")
+        .replace(/^\s*#{1,6}\s+/, ""),
+    )
+    .filter((line) => !/^\s*\**\s*выжимка дня\s*\**\s*:?\s*$/i.test(line));
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
