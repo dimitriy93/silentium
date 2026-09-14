@@ -6,10 +6,17 @@ import "server-only";
  * в браузер: этот модуль импортируется исключительно server actions'ами.
  */
 
-// «flash-latest» — стабильный алиас: имя конкретной версии меняется,
-// алиас остаётся рабочим для новых ключей (старые версии закрываются).
-const GEMINI_MODEL = "gemini-flash-latest";
 const TIMEOUT_MS = 45_000;
+
+// «flash-latest» — стабильный алиас: имена конкретных версий меняются
+// (старые закрываются для новых ключей), алиас остаётся рабочим.
+// Резервные версии — на случай, если алиас недоступен конкретному ключу:
+// модель выбирается по фактическому ответу API (404 → пробуем следующую).
+const GEMINI_MODELS = [
+  "gemini-flash-latest",
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
+] as const;
 
 export class GeminiError extends Error {
   /** Пользовательская формулировка без технических деталей и секретов. */
@@ -36,25 +43,24 @@ interface GeminiResponse {
   error?: { message?: string };
 }
 
-/**
- * Отправляет system prompt + user prompt, возвращает текст ответа.
- * Все ошибки сводятся к GeminiError с безопасным для показа сообщением.
- */
-export async function generateMentorText(systemPrompt: string, userPrompt: string): Promise<string> {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) {
-    throw new GeminiError(
-      "Наставник пока не настроен: на сервере не задан ключ Gemini. Добавь GEMINI_API_KEY в настройках окружения.",
-    );
-  }
+/** Результат одного запроса к конкретной модели. */
+interface GeminiAttempt {
+  ok: boolean;
+  status: number;
+  payload?: GeminiResponse;
+}
 
+async function requestModel(
+  model: string,
+  apiKey: string,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<GeminiAttempt> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-  let response: Response;
   try {
-    response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
       {
         method: "POST",
         headers: {
@@ -72,43 +78,79 @@ export async function generateMentorText(systemPrompt: string, userPrompt: strin
         signal: controller.signal,
       },
     );
-  } catch (error) {
-    const aborted = error instanceof Error && error.name === "AbortError";
-    throw new GeminiError(
-      aborted
-        ? "Наставник не успел ответить — канал слишком долог. Попробуй ещё раз через минуту."
-        : "Наставник недоступен: не удалось связаться с сервером AI. Попробуй позже.",
-      error,
-    );
+    if (!response.ok) {
+      return { ok: false, status: response.status };
+    }
+    return { ok: true, status: response.status, payload: (await response.json()) as GeminiResponse };
   } finally {
     clearTimeout(timeout);
   }
+}
 
-  if (response.status === 429) {
+/**
+ * Отправляет system prompt + user prompt, возвращает текст ответа.
+ * Все ошибки сводятся к GeminiError с безопасным для показа сообщением;
+ * в серверный лог попадает только код статуса — не тело ответа и не ключ.
+ */
+export async function generateMentorText(systemPrompt: string, userPrompt: string): Promise<string> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    throw new GeminiError(
+      "Наставник пока не настроен: на сервере не задан ключ Gemini. Добавь GEMINI_API_KEY в настройках окружения и передеплой.",
+    );
+  }
+
+  let lastStatus = 0;
+  let networkFailure: unknown = null;
+  for (const model of GEMINI_MODELS) {
+    let attempt: GeminiAttempt;
+    try {
+      attempt = await requestModel(model, apiKey, systemPrompt, userPrompt);
+    } catch (error) {
+      const aborted = error instanceof Error && error.name === "AbortError";
+      networkFailure = error;
+      if (aborted) {
+        throw new GeminiError(
+          "Наставник не успел ответить — канал слишком долог. Попробуй ещё раз через минуту.",
+          error,
+        );
+      }
+      // Сетевой сбой не зависит от модели — ретраить список версий бессмысленно.
+      throw new GeminiError(
+        "Наставник недоступен: не удалось связаться с сервером AI. Попробуй позже.",
+        error,
+      );
+    }
+    if (attempt.ok) {
+      return extractText(attempt.payload);
+    }
+    lastStatus = attempt.status;
+    // 404 — модель недоступна этому ключу; пробуем следующую версию.
+    // Любой другой статус — проблема не в имени модели, сразу наружу.
+    if (attempt.status !== 404) break;
+  }
+
+  if (lastStatus === 429) {
     throw new GeminiError("Наставник перегружен запросами. Попробуй через несколько минут.");
   }
-  if (!response.ok) {
-    // Детали (включая ключ) не показываем и не логируем вместе с телом ответа.
-    console.error(`[mentor] Gemini request failed with status ${response.status}`);
-    throw new GeminiError("Наставник не смог прочитать хронику. Попробуй позже.");
+  if (networkFailure !== null) {
+    throw new GeminiError(
+      "Наставник недоступен: не удалось связаться с сервером AI. Попробуй позже.",
+      networkFailure,
+    );
   }
+  console.error(`[mentor] Gemini request failed with status ${lastStatus}`);
+  throw new GeminiError("Наставник не смог прочитать хронику. Попробуй позже.");
+}
 
-  let payload: GeminiResponse;
-  try {
-    payload = (await response.json()) as GeminiResponse;
-  } catch (error) {
-    throw new GeminiError("Ответ наставника пришёл повреждённым. Попробуй ещё раз.", error);
-  }
-
-  if (payload.promptFeedback?.blockReason) {
+function extractText(payload: GeminiResponse | undefined): string {
+  if (payload?.promptFeedback?.blockReason) {
     throw new GeminiError("Наставник воздержался от ответа на эти записи.");
   }
-
-  const text = (payload.candidates?.[0]?.content?.parts ?? [])
+  const text = (payload?.candidates?.[0]?.content?.parts ?? [])
     .map((part) => part.text ?? "")
     .join("")
     .trim();
-
   if (text.length === 0) {
     throw new GeminiError("Наставник ответил пустотой. Попробуй ещё раз.");
   }
