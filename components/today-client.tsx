@@ -10,6 +10,7 @@ import type { LeisureEntry } from "@/lib/db/schema";
 import type { Thought } from "@/lib/db/schema";
 import { formatDateRu, formatMinutes, formatWeekdayRu, todayLocalDate } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
+import AvatarRoom from "@/components/avatar-room/avatar-room";
 
 /**
  * Главный экран «Сегодня»: дата, быстрый ввод мысли, сводка Пути,
@@ -55,6 +56,8 @@ export default function TodayClient() {
           {today ? formatWeekdayRu(today) : ""}
         </p>
       </header>
+
+      <AvatarRoom path={path} />
 
       <ThoughtsCard thoughts={thoughts} reload={reload} />
       <PathCard path={path} />
