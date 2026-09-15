@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import OrbitalLoader from "@/components/orbital-loader";
 import {
   createCreationEntry,
@@ -30,8 +31,18 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
+// Иллюстрация состояния пути: нейтральная + по одной на стихию.
+// Все слои рендерятся одновременно — изображения предзагружены, кроссфейд чистый.
+const PATH_IMAGES = [
+  { key: "neutral", src: "/path/path-neutral.webp", alt: "Нейтральное состояние пути" },
+  { key: "ogon", src: "/path/path-fire.webp", alt: "Путь Огня" },
+  { key: "voda", src: "/path/path-water.webp", alt: "Путь Воды" },
+  { key: "vozduh", src: "/path/path-air.webp", alt: "Путь Воздуха" },
+  { key: "zemlya", src: "/path/path-earth.webp", alt: "Путь Земли" },
+] as const;
+
 export default function PathClient() {
-  const [tab, setTab] = useState<TabKey>("ogon");
+  const [tab, setTab] = useState<TabKey | null>(null);
   const [day, setDay] = useState<PathDay | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,6 +61,28 @@ export default function PathClient() {
 
   return (
     <div className="space-y-5">
+      {/* Иллюстрация текущего состояния пути: кроссфейд в контейнере стабильной пропорции */}
+      <div
+        className="relative mx-auto aspect-[400/580] w-full"
+        aria-live="polite"
+      >
+        {PATH_IMAGES.map(({ key, src, alt }) => (
+          <Image
+            key={key}
+            src={src}
+            alt={tab === key || (tab === null && key === "neutral") ? alt : ""}
+            fill
+            sizes="(max-width: 480px) calc(100vw - 2.5rem), 440px"
+            className={
+              "object-contain transition-opacity duration-500 ease-out " +
+              (tab === key || (tab === null && key === "neutral")
+                ? "opacity-100"
+                : "pointer-events-none opacity-0")
+            }
+          />
+        ))}
+      </div>
+
       {/* Вкладки стихий: полные названия в две строки */}
       <nav className="bronze-card grid grid-cols-2 gap-1 p-1.5" aria-label="Стихии Пути">
         {TABS.map(({ key, symbol, title, subtitle }) => (
