@@ -9,6 +9,8 @@ import {
   deleteLeisureEntry as dbDeleteLeisure,
   listLeisureForDay as dbListLeisure,
 } from "@/lib/leisure";
+import { syncDayStreak } from "@/lib/day-streak";
+import { todayLocalDate } from "@/lib/format";
 import { entryDateSchema, formatZodError, nonEmptyText, uuidSchema } from "@/lib/validation";
 import type { Action } from "@/lib/types";
 
@@ -56,6 +58,7 @@ export async function createLeisureEntry(
     minutes: parsed.data.minutes ?? null,
     notes: parsed.data.notes,
   });
+  await syncDayStreak(user.id, parsed.data.entryDate);
   revalidateDay();
   return { ok: true, data: undefined };
 }
@@ -68,6 +71,7 @@ export async function deleteLeisureEntry(id: string): Promise<Action<void>> {
   if (!parsed.success) return { ok: false, error: "Некорректный идентификатор" };
 
   await dbDeleteLeisure(user.id, parsed.data);
+  await syncDayStreak(user.id, todayLocalDate());
   revalidateDay();
   return { ok: true, data: undefined };
 }

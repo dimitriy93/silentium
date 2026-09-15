@@ -24,6 +24,8 @@ import {
   deleteTrainingActivity as dbDeleteTraining,
   upsertNutrition as dbUpsertNutrition,
 } from "@/lib/path";
+import { syncDayStreak } from "@/lib/day-streak";
+import { todayLocalDate } from "@/lib/format";
 import { entryDateSchema, formatZodError, nonEmptyText, uuidSchema } from "@/lib/validation";
 import type { Action } from "@/lib/types";
 
@@ -114,6 +116,7 @@ export async function createTrainingActivity(
     detail: parsed.data.detail,
     durationMinutes: parsed.data.durationMinutes ?? null,
   });
+  await syncDayStreak(user.id, parsed.data.entryDate);
   revalidateDay();
   return { ok: true, data: undefined };
 }
@@ -126,6 +129,7 @@ export async function deleteTrainingActivity(id: string): Promise<Action<void>> 
   if (!parsed.success) return { ok: false, error: "Некорректный идентификатор" };
 
   await dbDeleteTraining(user.id, parsed.data);
+  await syncDayStreak(user.id, todayLocalDate());
   revalidateDay();
   return { ok: true, data: undefined };
 }
@@ -166,6 +170,7 @@ export async function saveNutrition(
     carbsGrams: parsed.data.carbsGrams ?? null,
     note: parsed.data.note,
   });
+  await syncDayStreak(user.id, parsed.data.entryDate);
   revalidateDay();
   return { ok: true, data: undefined };
 }
@@ -187,6 +192,7 @@ export async function createLearningEntry(entryDate: string, content: string): P
   if (!parsed.success) return { ok: false, error: formatZodError(parsed.error) };
 
   await dbCreateLearning(user.id, parsed.data.entryDate, parsed.data.content);
+  await syncDayStreak(user.id, parsed.data.entryDate);
   revalidateDay();
   return { ok: true, data: undefined };
 }
@@ -199,6 +205,7 @@ export async function deleteLearningEntry(id: string): Promise<Action<void>> {
   if (!parsed.success) return { ok: false, error: "Некорректный идентификатор" };
 
   await dbDeleteLearning(user.id, parsed.data);
+  await syncDayStreak(user.id, todayLocalDate());
   revalidateDay();
   return { ok: true, data: undefined };
 }
@@ -211,6 +218,7 @@ export async function createCreationEntry(entryDate: string, content: string): P
   if (!parsed.success) return { ok: false, error: formatZodError(parsed.error) };
 
   await dbCreateCreation(user.id, parsed.data.entryDate, parsed.data.content);
+  await syncDayStreak(user.id, parsed.data.entryDate);
   revalidateDay();
   return { ok: true, data: undefined };
 }
@@ -223,6 +231,7 @@ export async function deleteCreationEntry(id: string): Promise<Action<void>> {
   if (!parsed.success) return { ok: false, error: "Некорректный идентификатор" };
 
   await dbDeleteCreation(user.id, parsed.data);
+  await syncDayStreak(user.id, todayLocalDate());
   revalidateDay();
   return { ok: true, data: undefined };
 }

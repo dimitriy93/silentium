@@ -15,6 +15,7 @@ import {
   setAsceticismLog as dbSetAsceticismLog,
   updateAsceticism as dbUpdateAsceticism,
 } from "@/lib/asceticism";
+import { syncDayStreak } from "@/lib/day-streak";
 import { entryDateSchema, formatZodError, nonEmptyText, uuidSchema } from "@/lib/validation";
 import type { Action } from "@/lib/types";
 
@@ -162,6 +163,8 @@ export async function setAsceticismLog(
     parsed.data.status === "none" ? null : parsed.data.status,
     today,
   );
+  // Любая отметка аскезы — осмысленное действие дня для серии дневника.
+  await syncDayStreak(user.id, parsed.data.entryDate);
   revalidateAll();
   return { ok: true, data: undefined };
 }

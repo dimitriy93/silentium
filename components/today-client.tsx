@@ -10,6 +10,7 @@ import {
   type AsceticismAchievementView,
   type AsceticismDay,
 } from "@/actions/asceticism";
+import { getDayStreak, type DayStreakView } from "@/actions/day-streak";
 import { getPathDay, type PathDay } from "@/actions/path";
 import { listLeisureForDay } from "@/actions/leisure";
 import type { LeisureEntry } from "@/lib/db/schema";
@@ -31,21 +32,24 @@ export default function TodayClient() {
   const [leisure, setLeisure] = useState<LeisureEntry[] | null>(null);
   const [asceticism, setAsceticism] = useState<AsceticismDay | null>(null);
   const [achievements, setAchievements] = useState<AsceticismAchievementView[] | null>(null);
+  const [dayStreak, setDayStreak] = useState<DayStreakView | null>(null);
 
   const reload = useCallback(async () => {
     const date = todayLocalDate();
-    const [thoughtsRes, pathRes, leisureRes, asceticismRes, achievementsRes] = await Promise.all([
+    const [thoughtsRes, pathRes, leisureRes, asceticismRes, achievementsRes, dayStreakRes] = await Promise.all([
       listThoughtsForDay(date),
       getPathDay(date),
       listLeisureForDay(date),
       getAsceticismDay(date),
       getAsceticismAchievements(),
+      getDayStreak(date),
     ]);
     if (thoughtsRes.ok) setThoughts(thoughtsRes.data);
     if (pathRes.ok) setPath(pathRes.data);
     if (leisureRes.ok) setLeisure(leisureRes.data);
     if (asceticismRes.ok) setAsceticism(asceticismRes.data);
     if (achievementsRes.ok) setAchievements(achievementsRes.data);
+    if (dayStreakRes.ok) setDayStreak(dayStreakRes.data);
   }, []);
 
   useEffect(() => {
@@ -67,9 +71,11 @@ export default function TodayClient() {
         </p>
       </header>
 
+      <DayStreakCard streak={dayStreak} />
+
       <AvatarRoom path={path} asceticism={asceticism} />
 
-      <AchievementsCard achievements={achievements} />
+      <AchievementsCard achievements={achievements} dayStreak={dayStreak} />
 
       <ThoughtsCard thoughts={thoughts} reload={reload} />
       <PathCard path={path} />
@@ -104,6 +110,61 @@ function CardShell({
 
 function Empty({ text }: { text: string }) {
   return <p className="text-sm text-[var(--ink-faint)]">{text}</p>;
+}
+
+// ---------- Серия дневника ----------
+
+/**
+ * Карточка серии ведения дневника: между датой и комнатой аватара.
+ * Активная серия — золотая, отсутствующая — серая с подсказкой.
+ * Декор: бронзовые уголки и тонкий орнамент-разделитель.
+ */
+function DayStreakCard({ streak }: { streak: DayStreakView | null }) {
+  const active = (streak?.currentStreak ?? 0) > 0;
+  const n = streak?.currentStreak ?? 0;
+
+  const hint =
+    streak === null
+      ? null
+      : active
+        ? null
+        : (streak?.longestStreak ?? 0) > 0
+          ? "Начни путь сегодня. Ежедневная работа складывается в годы."
+          : "Сделай первую запись. Любое осмысленное действие продолжит серию.";
+
+  return (
+    <section className="bronze-card bronze-edge relative overflow-hidden px-4 py-4" aria-live="polite">
+      {/* Декоративные уголки хроники */}
+      <span aria-hidden="true" className="pointer-events-none absolute left-1.5 top-1.5 h-4 w-4 border-l border-t border-[var(--bronze-bright)]/50" />
+      <span aria-hidden="true" className="pointer-events-none absolute right-1.5 top-1.5 h-4 w-4 border-r border-t border-[var(--bronze-bright)]/50" />
+      <span aria-hidden="true" className="pointer-events-none absolute bottom-1.5 left-1.5 h-4 w-4 border-b border-l border-[var(--bronze-bright)]/50" />
+      <span aria-hidden="true" className="pointer-events-none absolute bottom-1.5 right-1.5 h-4 w-4 border-b border-r border-[var(--bronze-bright)]/50" />
+
+      <p className="font-chronicle text-center text-[11px] uppercase tracking-[0.3em] text-[var(--bronze-bright)]">
+        Активная серия
+      </p>
+      <p
+        className={
+          "font-chronicle mt-1.5 text-center text-3xl font-bold leading-none " +
+          (active ? "text-[var(--gold)]" : "text-[var(--ink-faint)]")
+        }
+      >
+        День {n}
+      </p>
+      <p className="mt-1.5 text-center text-xs text-[var(--ink-secondary)]">
+        {active ? `${n} ${n === 1 ? "день" : n < 5 ? "дня" : "дней"} подряд` : "Серия не начата"}
+      </p>
+
+      {/* Тонкий орнамент: линия с ромбом по центру */}
+      <div aria-hidden="true" className="mt-3 flex items-center gap-2 px-6">
+        <span className="engraved-line flex-1" />
+        <span className={"h-1.5 w-1.5 rotate-45 " + (active ? "bg-[var(--gold)]/70" : "bg-[var(--card-edge)]")} />
+        <span className="engraved-line flex-1" />
+      </div>
+
+      {hint ? <p className="mt-3 text-center text-xs leading-relaxed text-[var(--ink-faint)]">{hint}</p> : null}
+    </section>
+  );
 }
 
 // ---------- Мысли ----------
@@ -432,21 +493,40 @@ function StreakMedallion({ streak }: { streak: number }) {
 }
 
 /**
- * Блок достижений под Avatar Room: по карточке на аскезу, у которой есть
- * максимальный достигнутый порог серии. Кубок берётся из
- * public/achievements/trophy-{N}.webp, при отсутствии файла — заглушка.
+ * Блок достижений под Avatar Room: две ветки — достижения серий аскез
+ * (по карточке на аскезу с достигнутым порогом) и достижение общей серии
+ * дневника. Кубок берётся из public/achievements/trophy-{N}.webp,
+ * при отсутствии файла — заглушка.
  */
-function AchievementsCard({ achievements }: { achievements: AsceticismAchievementView[] | null }) {
-  if (achievements === null || achievements.length === 0) return null;
+interface AchievementItem {
+  key: string;
+  title: string;
+  milestone: number;
+}
+
+function AchievementsCard({
+  achievements,
+  dayStreak,
+}: {
+  achievements: AsceticismAchievementView[] | null;
+  dayStreak: DayStreakView | null;
+}) {
+  const items: AchievementItem[] = [
+    ...(achievements ?? []).map((a) => ({ key: `asc-${a.asceticismId}`, title: a.title, milestone: a.milestone })),
+    ...(dayStreak !== null && dayStreak.bestMilestone > 0
+      ? [{ key: "day-streak", title: "Серия дневника", milestone: dayStreak.bestMilestone }]
+      : []),
+  ];
+  if (items.length === 0) return null;
   return (
     <section className="bronze-card bronze-edge p-4">
       <h2 className="font-chronicle mb-3 text-base font-semibold text-[var(--gold)]">
         Достижения
       </h2>
       <ul className="grid grid-cols-2 gap-2">
-        {achievements.map((a) => (
+        {items.map((a) => (
           <li
-            key={a.asceticismId}
+            key={a.key}
             className="flex items-center gap-2.5 rounded-2xl border border-[var(--card-edge)] p-2"
           >
             <TrophyImage milestone={a.milestone} title={a.title} />

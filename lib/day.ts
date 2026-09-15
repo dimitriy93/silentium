@@ -122,33 +122,9 @@ export interface DaySummary {
 export async function listDaySummaries(userId: string, limit = 60): Promise<DaySummary[]> {
   return withUserDb(userId, async (tx) => {
     const result = await tx.execute(sql`
-      select entry_date::text as entry_date, src, status from (
-        select entry_date, 'thought' as src, null::text as status
-          from thoughts where user_id = ${userId}
-        union all
-        select entry_date, 'training' as src, null::text as status
-          from training_activities where user_id = ${userId}
-        union all
-        select entry_date, 'nutrition' as src, null::text as status
-          from nutrition_entries where user_id = ${userId}
-        union all
-        select entry_date, 'learning' as src, null::text as status
-          from learning_entries where user_id = ${userId}
-        union all
-        select entry_date, 'creation' as src, null::text as status
-          from creation_entries where user_id = ${userId}
-        union all
-        select entry_date, 'leisure' as src, null::text as status
-          from leisure_entries where user_id = ${userId}
-        union all
-        select entry_date, 'asceticism' as src, status
-          from asceticism_logs where user_id = ${userId}
-      ) d
+      select entry_date::text as entry_date, src, status from ${dayRowsUnionSql(userId)}
     `);
-    const raw = result as unknown;
-    const rows = (
-      Array.isArray(raw) ? raw : (raw as { rows: unknown[] }).rows
-    ) as Array<{ entry_date: string; src: string; status: string | null }>;
+    const rows = rowsOf(result) as Array<{ entry_date: string; src: string; status: string | null }>;
 
     const byDate = new Map<string, DaySummary>();
     const touch = (date: string): DaySummary => {
@@ -172,6 +148,106 @@ export async function listDaySummaries(userId: string, limit = 60): Promise<DayS
     }
 
     return [...byDate.values()].sort((a, b) => b.entryDate.localeCompare(a.entryDate)).slice(0, limit);
+  });
+}
+
+/**
+ * UNION ALL всех источников дневных записей: мысли, путь (4 стихии),
+ * развлечения, отметки аскез. Используется историей, серией дневника
+ * и хроникой — единый источник «в чём есть контент».
+ */
+export function dayRowsUnionSql(userId: string) {
+  return sql`(
+    select entry_date, 'thought' as src, null::text as status
+      from thoughts where user_id = ${userId}
+    union all
+    select entry_date, 'training' as src, null::text as status
+      from training_activities where user_id = ${userId}
+    union all
+    select entry_date, 'nutrition' as src, null::text as status
+      from nutrition_entries where user_id = ${userId}
+    union all
+    select entry_date, 'learning' as src, null::text as status
+      from learning_entries where user_id = ${userId}
+    union all
+    select entry_date, 'creation' as src, null::text as status
+      from creation_entries where user_id = ${userId}
+    union all
+    select entry_date, 'leisure' as src, null::text as status
+      from leisure_entries where user_id = ${userId}
+    union all
+    select entry_date, 'asceticism' as src, status
+      from asceticism_logs where user_id = ${userId}
+  ) d`;
+}
+
+/** Результат tx.execute: pg возвращает { rows }, драйвер-агностик — массив. */
+export function rowsOf(result: unknown): Array<Record<string, unknown>> {
+  const raw = result as unknown;
+  return (Array.isArray(raw) ? raw : (raw as { rows: unknown[] }).rows ?? []) as Array<
+    Record<string, unknown>
+  >;
+}
+
+// ---------- Пагинация истории ----------
+
+/** Записей на страницу истории. */
+export const HISTORY_PAGE_SIZE = 12;
+
+export interface DayPage {
+  days: DaySummary[];
+  page: number;
+  pageCount: number;
+  totalDays: number;
+}
+
+/**
+ * Страница истории с серверной пагинацией: LIMIT/OFFSET и общий счётчик
+ * дней одним запросом (count(*) over()), чтобы не гонять второй запрос.
+ */
+export async function listDaySummariesPage(
+  userId: string,
+  page: number,
+  pageSize: number = HISTORY_PAGE_SIZE,
+): Promise<DayPage> {
+  return withUserDb(userId, async (tx) => {
+    const offset = (page - 1) * pageSize;
+    const result = await tx.execute(sql`
+      select
+        entry_date::text as entry_date,
+        count(*) filter (where src <> 'asceticism') as total_entries,
+        count(*) filter (where src in ('training', 'nutrition', 'learning', 'creation')) > 0 as path_filled,
+        count(*) filter (where src = 'asceticism') as asceticism_total,
+        count(*) filter (where src = 'asceticism' and status = 'done') as asceticism_done,
+        count(*) over() as total_days
+      from ${dayRowsUnionSql(userId)}
+      group by entry_date
+      order by entry_date desc
+      limit ${pageSize} offset ${offset}
+    `);
+    const rows = rowsOf(result) as Array<{
+      entry_date: string;
+      total_entries: string;
+      path_filled: boolean;
+      asceticism_total: string;
+      asceticism_done: string;
+      total_days: string;
+    }>;
+
+    const days: DaySummary[] = rows.map((r) => ({
+      entryDate: r.entry_date,
+      totalEntries: Number(r.total_entries),
+      pathFilled: Boolean(r.path_filled),
+      asceticismDone: Number(r.asceticism_done),
+      asceticismTotal: Number(r.asceticism_total),
+    }));
+    const totalDays = rows.length > 0 ? Number(rows[0].total_days) : 0;
+    return {
+      days,
+      page,
+      totalDays,
+      pageCount: Math.max(1, Math.ceil(totalDays / pageSize)),
+    };
   });
 }
 

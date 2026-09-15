@@ -317,6 +317,27 @@ export const asceticismStreaks = pgTable(
 );
 
 /**
+ * Серия ведения дневника: сколько дней подряд есть хотя бы одна осмысленная
+ * запись (мысль, тренировка, обучение, созидание, питание, досуг, отметка
+ * аскезы). Одна строка на пользователя, создаётся лениво при первой записи
+ * и пересчитывается при каждом изменении контента. best_milestone —
+ * максимальный достигнутый порог серии (достижение); хранится навсегда.
+ */
+export const dayStreaks = pgTable(
+  "day_streaks",
+  {
+    userId: uuid("user_id").primaryKey(),
+    currentStreak: integer("current_streak").notNull().default(0),
+    longestStreak: integer("longest_streak").notNull().default(0),
+    bestMilestone: integer("best_milestone").notNull().default(0),
+    /** Последний день с осмысленной записью. */
+    lastActiveDate: date("last_active_date"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("day_streaks_user_idx").on(t.userId, t.bestMilestone)],
+);
+
+/**
  * Дневная AI-память: краткая структурированная выжимка дня, созданная
  * наставником по записям этого дня. content — jsonb со структурой:
  * { summary, observations[], adherence, achievements[], problems[], themes[] }.
@@ -407,5 +428,6 @@ export type LeisureEntry = typeof leisureEntries.$inferSelect;
 export type Asceticism = typeof asceticisms.$inferSelect;
 export type AsceticismLog = typeof asceticismLogs.$inferSelect;
 export type AsceticismStreak = typeof asceticismStreaks.$inferSelect;
+export type DayStreak = typeof dayStreaks.$inferSelect;
 export type AiDailyMemory = typeof aiDailyMemories.$inferSelect;
 export type MentorMessage = typeof mentorMessages.$inferSelect;

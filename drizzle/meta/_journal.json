@@ -22,6 +22,13 @@
       "when": 1789503400970,
       "tag": "0002_familiar_wolf_cub",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789506458216,
+      "tag": "0003_day_streak",
+      "breakpoints": true
     }
   ]
 }

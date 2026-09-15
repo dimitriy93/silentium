@@ -10,6 +10,8 @@ import {
   updateThought as dbUpdateThought,
 } from "@/lib/thoughts";
 import { listThoughts as dbListThoughts, listThoughtsForDay as dbListThoughtsForDay } from "@/lib/thoughts";
+import { syncDayStreak } from "@/lib/day-streak";
+import { todayLocalDate } from "@/lib/format";
 import { entryDateSchema, formatZodError, nonEmptyText, uuidSchema } from "@/lib/validation";
 import type { Action } from "@/lib/types";
 
@@ -58,6 +60,7 @@ export async function createThought(
   if (!parsed.success) return { ok: false, error: formatZodError(parsed.error) };
 
   await dbCreateThought(user.id, parsed.data.entryDate, parsed.data.content);
+  await syncDayStreak(user.id, parsed.data.entryDate);
   revalidatePath("/thoughts");
   revalidatePath("/today");
   revalidatePath("/history");
@@ -92,7 +95,10 @@ export async function deleteThought(id: string): Promise<Action<void>> {
   const parsed = uuidSchema.safeParse(id);
   if (!parsed.success) return { ok: false, error: "Некорректный идентификатор" };
 
+  // День удаления не известен — серия пересчитывается по «сегодня»:
+  // удаление последней записи пустого дня корректно обрывает серию.
   await dbDeleteThought(user.id, parsed.data);
+  await syncDayStreak(user.id, todayLocalDate());
   revalidatePath("/thoughts");
   revalidatePath("/today");
   revalidatePath("/history");
