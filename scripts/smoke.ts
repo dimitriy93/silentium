@@ -9,16 +9,20 @@
  *
  * Это dev-инструмент; в приложении userId всегда берётся из сессии Supabase.
  */
-import dotenv from "dotenv";
+import "./env-load";
 import postgres from "postgres";
 import { randomUUID } from "node:crypto";
 import * as schema from "../lib/db/schema";
 import { withUserDb } from "../lib/db";
 import {
   createAsceticism,
+  ensureAsceticismStreaks,
+  listAsceticismAchievements,
   listAsceticismLogsForDay,
   listAsceticisms,
+  restartAsceticismStreak,
   setAsceticismLog,
+  updateAsceticism,
 } from "../lib/asceticism";
 import { getDayEntries, listDaySummaries, upsertAiDailyMemory } from "../lib/day";
 import { createLeisureEntry, listLeisureForDay } from "../lib/leisure";
@@ -40,8 +44,6 @@ import {
   updateThought,
 } from "../lib/thoughts";
 
-dotenv.config({ path: ".env.local" });
-dotenv.config();
 
 let failures = 0;
 
@@ -60,7 +62,27 @@ async function main() {
   // На Supabase это одна и та же строка; локально суперпользователь обошёл бы RLS.
   const adminUrl = process.env.SMOKE_ADMIN_URL ?? process.env.DATABASE_URL;
   if (!adminUrl || !process.env.DATABASE_URL) throw new Error("DATABASE_URL is not set");
-  const admin = postgres(adminUrl, { prepare: false });
+  // Пулер Supabase в плохой фазе рвёт соединение после нескольких обменов,
+  // а postgres.js молча переочередивает запросы. Поэтому каждый admin-запрос
+  // идёт на свежем соединении с ретраями (как в scripts/apply-migrations.mjs).
+  async function admin(strings: TemplateStringsArray, ...values: unknown[]): Promise<Record<string, unknown>[]> {
+    let lastErr;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const sql = postgres(adminUrl!, { prepare: false, max: 1, connect_timeout: 15 });
+      try {
+        const r = (await sql(strings, ...(values as never[]))) as unknown as Record<string, unknown>[];
+        await sql.end();
+        return r;
+      } catch (e) {
+        lastErr = e;
+        await sql.end().catch(() => {});
+        const msg = String((e as Error)?.message ?? e);
+        if (!/ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|connection terminated|socket hang up/i.test(msg)) throw e;
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+      }
+    }
+    throw lastErr;
+  }
 
   const userId = randomUUID();
   const testUserIds: string[] = [userId];
@@ -133,6 +155,125 @@ async function main() {
     await setAsceticismLog(userId, asceticism.id, date, null);
     check("аскеза: снятие отметки", (await listAsceticismLogsForDay(userId, date)).length === 0);
 
+    // Серии и достижения.
+    const shift = (days: number): string => {
+      const d = new Date(`${date}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + days);
+      return d.toISOString().slice(0, 10);
+    };
+
+    // 1. Новая аскеза: строка серии создана сразу, серия нулевая.
+    const streakAsc = await createAsceticism(userId, {
+      title: "Серия: не пропускать зарядку",
+      startDate: shift(-400),
+    });
+    const streaks1 = await ensureAsceticismStreaks(userId, date);
+    const s1 = streaks1.find((s) => s.asceticismId === streakAsc.id);
+    check(
+      "серия: новая аскеза — серия 0, порог 0",
+      s1 !== undefined && s1.currentStreak === 0 && s1.bestMilestone === 0,
+    );
+
+    // 2. Серия 3 дня.
+    for (const off of [-2, -1, 0]) {
+      await setAsceticismLog(userId, streakAsc.id, shift(off), "done", date);
+    }
+    const streaks3 = (await ensureAsceticismStreaks(userId, date)).find(
+      (s) => s.asceticismId === streakAsc.id,
+    );
+    check(
+      "серия: 3 дня — current 3, best 3",
+      streaks3?.currentStreak === 3 && streaks3.bestMilestone === 3,
+    );
+
+    // 3. Серия 10 дней (дорисовываем дни до 10).
+    for (let off = -9; off <= -3; off++) {
+      await setAsceticismLog(userId, streakAsc.id, shift(off), "done", date);
+    }
+    const streaks10 = (await ensureAsceticismStreaks(userId, date)).find(
+      (s) => s.asceticismId === streakAsc.id,
+    );
+    check(
+      "серия: 10 дней — current 10, best 10",
+      streaks10?.currentStreak === 10 && streaks10.bestMilestone === 10,
+    );
+    const ach10 = await listAsceticismAchievements(userId);
+    check(
+      "достижение: порог 10 у аскезы",
+      ach10.some((a) => a.asceticismId === streakAsc.id && a.milestone === 10),
+    );
+
+    // 4. Серия 50 дней: best обновляется до 50.
+    for (let off = -49; off <= -10; off++) {
+      await setAsceticismLog(userId, streakAsc.id, shift(off), "done", date);
+    }
+    const streaks50 = (await ensureAsceticismStreaks(userId, date)).find(
+      (s) => s.asceticismId === streakAsc.id,
+    );
+    check(
+      "серия: 50 дней — current 50, best 50",
+      streaks50?.currentStreak === 50 && streaks50.bestMilestone === 50,
+    );
+    const ach50 = await listAsceticismAchievements(userId);
+    const achStreak = ach50.find((a) => a.asceticismId === streakAsc.id);
+    check(
+      "достижение: у аскезы хранится только максимум (Кубок 50, не 10)",
+      achStreak?.milestone === 50 && ach50.filter((a) => a.asceticismId === streakAsc.id).length === 1,
+    );
+
+    // 5. Прерывание серии: failed вчера — серия живёт только на сегодня.
+    await setAsceticismLog(userId, streakAsc.id, shift(-1), "failed", date);
+    const streaksBreak = (await ensureAsceticismStreaks(userId, date)).find(
+      (s) => s.asceticismId === streakAsc.id,
+    );
+    check(
+      "серия: failed обрывает серию (current 1), достижение 50 осталось",
+      streaksBreak?.currentStreak === 1 && streaksBreak.bestMilestone === 50,
+    );
+
+    // 6. Закрытие (деактивация): серия заканчивается, достижение остаётся.
+    await updateAsceticism(userId, streakAsc.id, { isActive: false });
+    const achClosed = await listAsceticismAchievements(userId);
+    check(
+      "закрытие: достижение 50 сохраняется после деактивации",
+      achClosed.some((a) => a.asceticismId === streakAsc.id && a.milestone === 50),
+    );
+
+    // 7. Повторный запуск: серия начинается заново с today.
+    await updateAsceticism(userId, streakAsc.id, { isActive: true });
+    await restartAsceticismStreak(userId, streakAsc.id, date);
+    const streaksRestart = (await ensureAsceticismStreaks(userId, date)).find(
+      (s) => s.asceticismId === streakAsc.id,
+    );
+    check(
+      "повторный запуск: серия сброшена, best 50 сохранён",
+      streaksRestart?.currentStreak === 0 && streaksRestart?.bestMilestone === 50,
+    );
+    await setAsceticismLog(userId, streakAsc.id, date, "done", date);
+    const streaksAfterRestart = (await ensureAsceticismStreaks(userId, date)).find(
+      (s) => s.asceticismId === streakAsc.id,
+    );
+    check(
+      "повторный запуск: новая серия считается только с даты запуска",
+      streaksAfterRestart?.currentStreak === 1 && streaksAfterRestart.bestMilestone === 50,
+    );
+
+    // 8. Backfill по существующей истории: аскеза со старыми done-отметками.
+    const backfillAsc = await createAsceticism(userId, {
+      title: "Backfill: серия из истории",
+      startDate: shift(-6),
+    });
+    for (let off = -6; off <= -4; off++) {
+      await setAsceticismLog(userId, backfillAsc.id, shift(off), "done", date);
+    }
+    const backfillStreak = (await ensureAsceticismStreaks(userId, date)).find(
+      (s) => s.asceticismId === backfillAsc.id,
+    );
+    check(
+      "backfill: история пересчитана (серия 0, достижение 3)",
+      backfillStreak?.currentStreak === 0 && backfillStreak.bestMilestone === 3,
+    );
+
     // День / история.
     const dayEntries = await getDayEntries(userId, date);
     check(
@@ -143,7 +284,9 @@ async function main() {
         dayEntries.nutrition !== null,
     );
     const summaries = await listDaySummaries(userId);
-    check("история: список дней", summaries.length === 1 && summaries[0].totalEntries === 4);
+    // Дни с отметками аскез без записей остальных разделов не считаем пустыми.
+    const nonEmptyDays = summaries.filter((s) => s.totalEntries > 0);
+    check("история: список дней", nonEmptyDays.length === 1 && nonEmptyDays[0].totalEntries === 4);
 
     // AI-память (выжимка дня).
     await upsertAiDailyMemory(
@@ -178,7 +321,6 @@ async function main() {
     for (const id of testUserIds) {
       await admin`delete from auth.users where id = ${id}`;
     }
-    await admin.end();
   }
 
   if (failures > 0) {
@@ -196,5 +338,7 @@ void main()
   })
   .finally(() => {
     // Пул lib/db намеренно живёт до конца процесса — завершаем скрипт явно.
-    process.exit(process.exitCode ?? 0);
+    // Небольшая задержка: мгновенный process.exit обрезает буферизованный
+    // stdout при перенаправлении вывода (часть проверок терялась).
+    setTimeout(() => process.exit(process.exitCode ?? 0), 300);
   });

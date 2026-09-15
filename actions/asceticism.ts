@@ -3,12 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/supabase/server";
-import type { Asceticism, AsceticismLog } from "@/lib/db/schema";
+import type { Asceticism, AsceticismLog, AsceticismStreak } from "@/lib/db/schema";
 import {
   createAsceticism as dbCreateAsceticism,
   deleteAsceticism as dbDeleteAsceticism,
+  ensureAsceticismStreaks,
+  listAsceticismAchievements,
   listAsceticismLogsForDay as dbListLogsForDay,
   listAsceticisms as dbListAsceticisms,
+  restartAsceticismStreak,
   setAsceticismLog as dbSetAsceticismLog,
   updateAsceticism as dbUpdateAsceticism,
 } from "@/lib/asceticism";
@@ -32,9 +35,10 @@ function revalidateAll() {
 export interface AsceticismDay {
   list: Asceticism[];
   logs: AsceticismLog[];
+  streaks: AsceticismStreak[];
 }
 
-/** Аскезы + отметки за день. */
+/** Аскезы + отметки за день + серии (с ленивым backfill по истории отметок). */
 export async function getAsceticismDay(entryDate: string): Promise<Action<AsceticismDay>> {
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "Требуется авторизация" };
@@ -42,11 +46,25 @@ export async function getAsceticismDay(entryDate: string): Promise<Action<Asceti
   const parsed = entryDateSchema.safeParse(entryDate);
   if (!parsed.success) return { ok: false, error: formatZodError(parsed.error) };
 
-  const [list, logs] = await Promise.all([
+  const [list, logs, streaks] = await Promise.all([
     dbListAsceticisms(user.id),
     dbListLogsForDay(user.id, parsed.data),
+    ensureAsceticismStreaks(user.id, parsed.data),
   ]);
-  return { ok: true, data: { list, logs } };
+  return { ok: true, data: { list, logs, streaks } };
+}
+
+export interface AsceticismAchievementView {
+  asceticismId: string;
+  title: string;
+  milestone: number;
+}
+
+/** Достижения аскез: максимальный порог серии каждой аскезы. */
+export async function getAsceticismAchievements(): Promise<Action<AsceticismAchievementView[]>> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "Требуется авторизация" };
+  return { ok: true, data: await listAsceticismAchievements(user.id) };
 }
 
 export async function createAsceticism(
@@ -79,6 +97,7 @@ const updateSchema = z.object({
 export async function updateAsceticism(
   id: string,
   values: { title?: string; description?: string | null; isActive?: boolean },
+  today?: string,
 ): Promise<Action<void>> {
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "Требуется авторизация" };
@@ -92,6 +111,14 @@ export async function updateAsceticism(
     ...(parsed.data.isActive !== undefined ? { isActive: parsed.data.isActive } : {}),
   });
   if (!updated) return { ok: false, error: "Аскеза не найдена" };
+
+  // Повторный запуск: серия начинается заново, достижение остаётся навсегда.
+  if (parsed.data.isActive === true && today) {
+    const parsedToday = entryDateSchema.safeParse(today);
+    if (parsedToday.success) {
+      await restartAsceticismStreak(user.id, parsed.data.id, parsedToday.data);
+    }
+  }
 
   revalidateAll();
   return { ok: true, data: undefined };
@@ -120,6 +147,7 @@ export async function setAsceticismLog(
   id: string,
   entryDate: string,
   status: "done" | "failed" | "none",
+  today?: string,
 ): Promise<Action<void>> {
   const user = await getCurrentUser();
   if (!user) return { ok: false, error: "Требуется авторизация" };
@@ -132,6 +160,7 @@ export async function setAsceticismLog(
     parsed.data.id,
     parsed.data.entryDate,
     parsed.data.status === "none" ? null : parsed.data.status,
+    today,
   );
   revalidateAll();
   return { ok: true, data: undefined };

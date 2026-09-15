@@ -13,6 +13,7 @@ if (!url) throw new Error("DATABASE_URL is not set");
 const files = [
   { tag: "0000_empty_fallen_one", path: "./drizzle/0000_empty_fallen_one.sql", when: 1789246047681n },
   { tag: "0001_rls", path: "./drizzle/0001_rls.sql", when: 1789246047781n },
+  { tag: "0002_familiar_wolf_cub", path: "./drizzle/0002_familiar_wolf_cub.sql", when: 1789500000000n },
 ];
 
 async function execFresh(query) {

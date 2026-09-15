@@ -3,12 +3,19 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { createThought, listThoughtsForDay } from "@/actions/thoughts";
-import { getAsceticismDay, setAsceticismLog, type AsceticismDay } from "@/actions/asceticism";
+import {
+  getAsceticismAchievements,
+  getAsceticismDay,
+  setAsceticismLog,
+  type AsceticismAchievementView,
+  type AsceticismDay,
+} from "@/actions/asceticism";
 import { getPathDay, type PathDay } from "@/actions/path";
 import { listLeisureForDay } from "@/actions/leisure";
 import type { LeisureEntry } from "@/lib/db/schema";
 import type { Thought } from "@/lib/db/schema";
 import { formatDateRu, formatMinutes, formatWeekdayRu, todayLocalDate } from "@/lib/format";
+import { displayStreak, pluralDays } from "@/lib/asceticism-streak";
 import OrbitalLoader from "@/components/orbital-loader";
 import AvatarRoom from "@/components/avatar-room/avatar-room";
 
@@ -23,19 +30,22 @@ export default function TodayClient() {
   const [path, setPath] = useState<PathDay | null>(null);
   const [leisure, setLeisure] = useState<LeisureEntry[] | null>(null);
   const [asceticism, setAsceticism] = useState<AsceticismDay | null>(null);
+  const [achievements, setAchievements] = useState<AsceticismAchievementView[] | null>(null);
 
   const reload = useCallback(async () => {
     const date = todayLocalDate();
-    const [thoughtsRes, pathRes, leisureRes, asceticismRes] = await Promise.all([
+    const [thoughtsRes, pathRes, leisureRes, asceticismRes, achievementsRes] = await Promise.all([
       listThoughtsForDay(date),
       getPathDay(date),
       listLeisureForDay(date),
       getAsceticismDay(date),
+      getAsceticismAchievements(),
     ]);
     if (thoughtsRes.ok) setThoughts(thoughtsRes.data);
     if (pathRes.ok) setPath(pathRes.data);
     if (leisureRes.ok) setLeisure(leisureRes.data);
     if (asceticismRes.ok) setAsceticism(asceticismRes.data);
+    if (achievementsRes.ok) setAchievements(achievementsRes.data);
   }, []);
 
   useEffect(() => {
@@ -58,6 +68,8 @@ export default function TodayClient() {
       </header>
 
       <AvatarRoom path={path} asceticism={asceticism} />
+
+      <AchievementsCard achievements={achievements} />
 
       <ThoughtsCard thoughts={thoughts} reload={reload} />
       <PathCard path={path} />
@@ -303,7 +315,7 @@ function AsceticismCard({
     if (!today || pendingMark) return;
     setPendingMark({ id, status });
     setMarkError(null);
-    const res = await setAsceticismLog(id, today, status);
+    const res = await setAsceticismLog(id, today, status, today);
     setPendingMark(null);
     if (!res.ok) {
       setMarkError(res.error);
@@ -322,6 +334,8 @@ function AsceticismCard({
         <ul className="space-y-2">
           {active.map((a) => {
             const log = asceticism.logs.find((l) => l.asceticismId === a.id);
+            const streakView = asceticism.streaks.find((s) => s.asceticismId === a.id);
+            const streak = streakView && today ? displayStreak(streakView, today) : 0;
             const pending = pendingMark !== null;
             return (
               <li
@@ -333,7 +347,10 @@ function AsceticismCard({
                     : "border-transparent")
                 }
               >
-                <p className="mb-1 text-sm font-medium">{a.title}</p>
+                <p className="mb-1 flex items-center gap-2 text-sm font-medium">
+                  <span className="line-clamp-1 flex-1">{a.title}</span>
+                  {streak > 0 ? <StreakMedallion streak={streak} /> : null}
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -386,6 +403,88 @@ function MarkSpinner() {
     <span
       aria-hidden="true"
       className="block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70"
+    />
+  );
+}
+
+// ---------- Достижения аскез ----------
+
+/**
+ * Медальон серии: компактный жетон с числом дней рядом с названием аскезы.
+ */
+function StreakMedallion({ streak }: { streak: number }) {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1.5"
+      title={`Серия: ${pluralDays(streak)}`}
+    >
+      <span
+        aria-hidden="true"
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--gold)] bg-[radial-gradient(circle_at_30%_30%,rgba(255,215,130,0.35),rgba(122,86,32,0.25))] text-[10px] font-bold text-[var(--gold)]"
+      >
+        {streak > 999 ? "1k+" : streak}
+      </span>
+      <span className="whitespace-nowrap text-xs font-semibold text-[var(--gold)]">
+        День {streak}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Блок достижений под Avatar Room: по карточке на аскезу, у которой есть
+ * максимальный достигнутый порог серии. Кубок берётся из
+ * public/achievements/trophy-{N}.webp, при отсутствии файла — заглушка.
+ */
+function AchievementsCard({ achievements }: { achievements: AsceticismAchievementView[] | null }) {
+  if (achievements === null || achievements.length === 0) return null;
+  return (
+    <section className="bronze-card bronze-edge p-4">
+      <h2 className="font-chronicle mb-3 text-base font-semibold text-[var(--gold)]">
+        Достижения
+      </h2>
+      <ul className="grid grid-cols-2 gap-2">
+        {achievements.map((a) => (
+          <li
+            key={a.asceticismId}
+            className="flex items-center gap-2.5 rounded-2xl border border-[var(--card-edge)] p-2"
+          >
+            <TrophyImage milestone={a.milestone} title={a.title} />
+            <div className="min-w-0">
+              <p className="line-clamp-2 text-sm font-medium leading-tight">{a.title}</p>
+              <p className="text-xs text-[var(--ink-secondary)]">
+                Серия: {pluralDays(a.milestone)}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Кубок порога; если WEBP ещё не добавлен — бронзовая заглушка-медальон. */
+function TrophyImage({ milestone, title }: { milestone: number; title: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span
+        aria-hidden="true"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--gold)] bg-[radial-gradient(circle_at_30%_30%,rgba(255,215,130,0.35),rgba(122,86,32,0.25))] text-[11px] font-bold text-[var(--gold)]"
+      >
+        {milestone}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/achievements/trophy-${milestone}.webp`}
+      alt={`Награда «${title}» за ${pluralDays(milestone)}`}
+      width={40}
+      height={40}
+      className="h-10 w-10 shrink-0 object-contain"
+      onError={() => setFailed(true)}
     />
   );
 }

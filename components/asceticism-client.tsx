@@ -11,11 +11,12 @@ import {
 } from "@/actions/asceticism";
 import type { Asceticism } from "@/lib/db/schema";
 import { formatDateRu, todayLocalDate } from "@/lib/format";
+import { displayStreak, pluralDays } from "@/lib/asceticism-streak";
 import OrbitalLoader from "@/components/orbital-loader";
 
 /**
  * Раздел «Аскезы»: список правил + отметка за сегодня (выполнено / не
- * выполнено), создание и редактирование. Серии и награды добавятся позже.
+ * выполнено), создание и редактирование, серии и награды.
  */
 export default function AsceticismClient() {
   const [data, setData] = useState<AsceticismDay | null>(null);
@@ -87,7 +88,18 @@ function AsceticismList({
     <div className="space-y-3">
       {data.list.map((a) => {
         const log = data.logs.find((l) => l.asceticismId === a.id);
-        return <AsceticismCard key={a.id} asceticism={a} log={log} reload={reload} today={today} />;
+        const streakView = data.streaks.find((s) => s.asceticismId === a.id);
+        const streak = streakView && today ? displayStreak(streakView, today) : 0;
+        return (
+          <AsceticismCard
+            key={a.id}
+            asceticism={a}
+            log={log}
+            streak={streak}
+            reload={reload}
+            today={today}
+          />
+        );
       })}
     </div>
   );
@@ -96,11 +108,13 @@ function AsceticismList({
 function AsceticismCard({
   asceticism: a,
   log,
+  streak,
   reload,
   today,
 }: {
   asceticism: Asceticism;
   log: AsceticismDay["logs"][number] | undefined;
+  streak: number;
   reload: () => Promise<void>;
   today: string | null;
 }) {
@@ -113,7 +127,7 @@ function AsceticismCard({
     if (pendingStatus || !today) return;
     setPendingStatus(status);
     setMarkError(null);
-    const res = await setAsceticismLog(a.id, today, status);
+    const res = await setAsceticismLog(a.id, today, status, today);
     setPendingStatus(null);
     if (!res.ok) {
       setMarkError(res.error);
@@ -132,6 +146,7 @@ function AsceticismCard({
           <p className="mt-0.5 text-xs text-[var(--ink-faint)]">
             с {formatDateRu(a.startDate)}
             {a.isActive ? "" : " · не активна"}
+            {a.isActive && streak > 0 ? ` · серия ${pluralDays(streak)}` : ""}
           </p>
         </div>
         <CardMenu asceticism={a} reload={reload} />
@@ -226,7 +241,7 @@ function ButtonSpinner() {
 
 function CardMenu({ asceticism: a, reload }: { asceticism: Asceticism; reload: () => Promise<void> }) {
   async function toggleActive() {
-    await updateAsceticism(a.id, { isActive: !a.isActive });
+    await updateAsceticism(a.id, { isActive: !a.isActive }, todayLocalDate());
     await reload();
   }
 

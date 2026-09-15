@@ -43,7 +43,7 @@ const pool = new Pool({
 pool.on("error", () => {});
 
 type Db = NodePgDatabase<typeof schema>;
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 function isConnectionError(err: unknown): boolean {
   // Drizzle оборачивает ошибки запросов ("Failed query: ..."), а причина — в

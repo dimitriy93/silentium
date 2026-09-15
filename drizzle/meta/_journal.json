@@ -15,6 +15,13 @@
       "when": 1789246047781,
       "tag": "0001_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789503400970,
+      "tag": "0002_familiar_wolf_cub",
+      "breakpoints": true
     }
   ]
 }

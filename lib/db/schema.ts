@@ -246,7 +246,7 @@ export const leisureEntries = pgTable(
 
 /**
  * Аскеза — долгосрочное правило/ограничение. is_active = false отключает
- * отметки, история сохраняется. Серии/награды/рубежи — позже, поверх логов.
+ * отметки, история сохраняется. Серии и рубежи живут в asceticism_streaks.
  */
 export const asceticisms = pgTable(
   "asceticisms",
@@ -282,6 +282,37 @@ export const asceticismLogs = pgTable(
     unique("asceticism_logs_unique").on(t.asceticismId, t.entryDate),
     index("asceticism_logs_user_date_idx").on(t.userId, t.entryDate),
     check("asceticism_logs_status_check", sql`${t.status} in ('done', 'failed')`),
+  ],
+);
+
+/**
+ * Серия аскезы и её максимальная награда. Одна строка на аскезу, создаётся
+ * лениво (backfill по истории отметок) и пересчитывается при каждой отметке.
+ *
+ * current_streak — серия до последней отметки 'done' (серия из 'done' подряд,
+ * 'failed' или пропуск дня её обрывает). best_milestone — максимальный
+ * достигнутый порог серии (награда); хранится навсегда, даже после сброса
+ * серии или отключения аскезы. streak_since — дата повторного запуска
+ * (деактивация → активация): серия после неё считается заново.
+ */
+export const asceticismStreaks = pgTable(
+  "asceticism_streaks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    asceticismId: uuid("asceticism_id")
+      .notNull()
+      .references(() => asceticisms.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    currentStreak: integer("current_streak").notNull().default(0),
+    longestStreak: integer("longest_streak").notNull().default(0),
+    bestMilestone: integer("best_milestone").notNull().default(0),
+    lastDoneDate: date("last_done_date"),
+    streakSince: date("streak_since"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("asceticism_streaks_unique").on(t.asceticismId),
+    index("asceticism_streaks_user_idx").on(t.userId, t.bestMilestone),
   ],
 );
 
@@ -375,5 +406,6 @@ export type CreationEntry = typeof creationEntries.$inferSelect;
 export type LeisureEntry = typeof leisureEntries.$inferSelect;
 export type Asceticism = typeof asceticisms.$inferSelect;
 export type AsceticismLog = typeof asceticismLogs.$inferSelect;
+export type AsceticismStreak = typeof asceticismStreaks.$inferSelect;
 export type AiDailyMemory = typeof aiDailyMemories.$inferSelect;
 export type MentorMessage = typeof mentorMessages.$inferSelect;
