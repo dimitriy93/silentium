@@ -47,6 +47,8 @@ interface GeminiResponse {
 interface GeminiAttempt {
   ok: boolean;
   status: number;
+  /** Сообщение из тела ошибки — только в серверный лог, без ключа. */
+  errorMessage?: string;
   payload?: GeminiResponse;
 }
 
@@ -82,7 +84,10 @@ async function requestModel(
       },
     );
     if (!response.ok) {
-      return { ok: false, status: response.status };
+      // Тело ошибки нужно для серверного лога: без него ветка «не сработало»
+      // неотличима от ключевой проблемы, и диагноз невозможен.
+      const body = (await response.json().catch(() => null)) as GeminiResponse | null;
+      return { ok: false, status: response.status, errorMessage: body?.error?.message };
     }
     return { ok: true, status: response.status, payload: (await response.json()) as GeminiResponse };
   } finally {
@@ -104,6 +109,7 @@ export async function generateMentorText(systemPrompt: string, userPrompt: strin
   }
 
   let lastStatus = 0;
+  let lastErrorMessage: string | undefined;
   let networkFailure: unknown = null;
   for (const model of GEMINI_MODELS) {
     let attempt: GeminiAttempt;
@@ -128,9 +134,12 @@ export async function generateMentorText(systemPrompt: string, userPrompt: strin
       return extractText(attempt.payload);
     }
     lastStatus = attempt.status;
-    // 404 — модель недоступна этому ключу; пробуем следующую версию.
-    // Любой другой статус — проблема не в имени модели, сразу наружу.
-    if (attempt.status !== 404) break;
+    lastErrorMessage = attempt.errorMessage;
+    // 404 — модель недоступна этому ключу; 429/5xx — перегрузка/временный сбой.
+    // Всё перечисленное не зависит от имени модели, но следующая версия может
+    // ответить нормально — пробуем следующую. Прерываем только на ошибках
+    // самого запроса (400/401/403 — плохой prompt или ключ).
+    if (attempt.status !== 404 && attempt.status !== 429 && attempt.status < 500) break;
   }
 
   if (lastStatus === 429) {
@@ -142,7 +151,10 @@ export async function generateMentorText(systemPrompt: string, userPrompt: strin
       networkFailure,
     );
   }
-  console.error(`[mentor] Gemini request failed with status ${lastStatus}`);
+  console.error(
+    `[mentor] Gemini request failed with status ${lastStatus}` +
+      (lastErrorMessage ? `: ${lastErrorMessage}` : ""),
+  );
   throw new GeminiError("Наставник не смог прочитать хронику. Попробуй позже.");
 }
 
