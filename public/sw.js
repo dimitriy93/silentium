@@ -7,13 +7,12 @@
  *  - остальное (server actions, API): только сеть.
  * Версия кеша: при деплое менять CACHE_VERSION.
  */
-const CACHE_VERSION = "silentium-v2";
+const CACHE_VERSION = "silentium-v3";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGES_CACHE = `${CACHE_VERSION}-pages`;
 
 const PRECACHE = [
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
+  "/icons/icon.png",
   "/room/room_morning.webp",
   "/room/room_afternoon.webp",
   "/room/room_evening.webp",

@@ -189,3 +189,39 @@ body {
     animation-duration: 6s;
   }
 }
+
+/* Индикатор ожидания «•••» в диалоговой панели: три точки мягко и
+   поочерёдно проявляются и затухают. Чистый CSS, без таймеров. */
+.dialogue-typing {
+  gap: 6px;
+  height: 18px;
+}
+.dialogue-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+  opacity: 0.3;
+  animation: dialogue-typing-dot 2.4s ease-in-out infinite;
+}
+.dialogue-typing span:nth-child(2) {
+  animation-delay: 0.4s;
+}
+.dialogue-typing span:nth-child(3) {
+  animation-delay: 0.8s;
+}
+@keyframes dialogue-typing-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dialogue-typing span {
+    animation: none;
+    opacity: 0.45;
+  }
+}

@@ -188,13 +188,26 @@ export default function AvatarRoom({
             border: "1px solid var(--card-edge)",
           }}
         />
-        <p
-          aria-live="polite"
-          className="min-w-0 flex-1 text-[13px] leading-snug text-[var(--ink)] transition-opacity duration-700"
-          style={{ opacity: message ? 1 : 0 }}
-        >
-          {message ?? ""}
-        </p>
+        {/* Между репликами — спокойный индикатор ожидания «•••»: тот же
+            тайминг-цикл useDialogue (message === null), без своих таймеров. */}
+        {message ? (
+          <p
+            aria-live="polite"
+            className="min-w-0 flex-1 text-[13px] leading-snug text-[var(--ink)] transition-opacity duration-700"
+          >
+            {message}
+          </p>
+        ) : (
+          <div
+            role="status"
+            aria-label="Спутник обдумывает реплику"
+            className="dialogue-typing flex min-w-0 flex-1 items-center"
+          >
+            <span />
+            <span />
+            <span />
+          </div>
+        )}
       </div>
     </section>
   );
