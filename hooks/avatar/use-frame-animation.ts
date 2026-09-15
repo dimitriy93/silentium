@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ANIMATIONS, animationKey, type AvatarState } from "@/lib/avatar/sprites";
 
 /**
@@ -14,10 +14,26 @@ export function useFrameAnimation(state: AvatarState) {
   const key = animationKey(state);
   const animation = ANIMATIONS[key];
 
+  // В SIT поза выбирается один раз на вход в состояние (memo пересчитывается
+  // только при смене ключа анимации) и держится до конца SIT — без цикла кадров.
+  // При выходе из SIT ключ меняется и запомненная поза сбрасывается сама.
+  const sitFrame = useMemo(
+    () =>
+      state.kind === "SIT" && animation
+        ? Math.floor(Math.random() * animation.frames.length)
+        : 0,
+    [animation, state.kind],
+  );
+
   useEffect(() => {
     if (!animation) return;
     const img = imgRef.current;
     if (!img) return;
+
+    if (state.kind === "SIT") {
+      img.src = animation.frames[sitFrame];
+      return; // статичная поза: никакого rAF-цикла, кадр не меняется
+    }
 
     const { frames, fps, loop } = animation;
     const image = img;
@@ -50,7 +66,7 @@ export function useFrameAnimation(state: AvatarState) {
       stopped = true;
       cancelAnimationFrame(raf);
     };
-  }, [animation]);
+  }, [animation, state.kind, sitFrame]);
 
-  return { imgRef, initialSrc: animation?.frames[0] ?? "" };
+  return { imgRef, initialSrc: animation?.frames[sitFrame] ?? "" };
 }

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import AvatarSprite from "@/components/avatar/avatar-sprite";
 import { useAvatarBehavior, DEFAULT_AVATAR_BOUNDS } from "@/hooks/avatar/use-avatar-behavior";
 import { useDialogue } from "@/hooks/dialog/use-dialogue";
-import { activityCountOfDay, moodForActivityCount } from "@/lib/avatar/mood";
+import { activityCountOfDay, moodForActivityCount, type Mood } from "@/lib/avatar/mood";
 import {
   EMPTY_FACTS,
   phrasesForScenario,
@@ -33,9 +33,26 @@ const AVATAR_SIZE_PX = 112;
 const AVATAR_EDGE_GAP_PX = 4;
 /** Вертикальная точка опоры аватара — доля высоты комнаты. */
 const AVATAR_BOTTOM = 0.14;
+/** Размер портрета в диалоговой панели, px. */
+const PORTRAIT_SIZE_PX = 56;
 
 function roomImageSrc(period: RoomPeriod): string {
   return ROOM_IMAGES[period];
+}
+
+/**
+ * Портрет спутника в диалоговой панели: настроение дня → лицо.
+ * Известные настроения маппятся явно, неизвестные — на усталое лицо.
+ */
+const MOOD_FACE: Record<Mood, string> = {
+  happy: "/avatar/face/happy.png",
+  neutral: "/avatar/face/neutral.png",
+  concerned: "/avatar/face/sad.png",
+};
+const FALLBACK_FACE = "/avatar/face/tired.png";
+
+function faceForMood(mood: Mood): string {
+  return MOOD_FACE[mood] ?? FALLBACK_FACE;
 }
 
 /** Факты дня из загруженных записей: Путь, аскезы, развлечения. */
@@ -108,11 +125,12 @@ export default function AvatarRoom({
     return () => observer.disconnect();
   }, []);
 
-  // Пузырь закреплён статично в верхней центральной области комнаты и не
-  // следует за аватаром: персонаж ходит, реплика остаётся на месте.
+  // Диалоговая панель закреплена внизу карточки и не следует за аватаром;
+  // портрет и текст живут в собственном блоке под сценой комнаты.
 
   return (
     <section className="bronze-card bronze-edge overflow-hidden">
+      {/* Комната: скруглены только верхние углы, низ «уходит» под панель */}
       <div ref={roomRef} className="relative w-full" style={{ aspectRatio: "765 / 509" }}>
         {/* Фон: два слоя для плавного кроссфейда при смене периода */}
         <RoomBackground
@@ -121,34 +139,10 @@ export default function AvatarRoom({
           onTopLayerReady={setBgReady}
         />
 
-        {/* Реплика спутника: фиксированная позиция комнаты, без привязки к аватару */}
-        <div
-          aria-live="polite"
-          className="absolute flex -translate-x-1/2 justify-center transition-[opacity,transform] duration-700"
-          style={{
-            left: "50%",
-            bottom: `calc(${AVATAR_BOTTOM * 100}% + ${AVATAR_SIZE_PX + 8}px)`,
-            opacity: message ? 1 : 0,
-            transform: message ? "translateY(0)" : "translateY(4px)",
-          }}
-        >
-          {message ? (
-            <p
-              className="max-w-[60%] rounded-xl px-3.5 py-2 text-center text-[13px] leading-snug text-[var(--ink)]"
-              style={{
-                background: "rgba(10, 15, 28, 0.74)",
-                border: "1px solid var(--card-edge)",
-                backdropFilter: "blur(6px)",
-              }}
-            >
-              {message}
-            </p>
-          ) : null}
-        </div>
-
         {/* Аватар: перемещение сглаживает CSS-переход, длительность задаёт behavior.
             Переход на left включается ТОЛЬКО в состоянии WALK — сидя и в idle
-            позиция не анимируется в принципе. */}
+            позиция не анимируется в принципе. Панель диалога — отдельный блок
+            под комнатой, аватар в сцене остаётся полностью видимым. */}
         <div
           className="absolute"
           style={{
@@ -170,6 +164,37 @@ export default function AvatarRoom({
             <AvatarSprite state={actor.state} size={AVATAR_SIZE_PX} />
           </div>
         </div>
+      </div>
+
+      {/* Панель диалога в стиле визуальной новеллы: прижата к низу карточки,
+          портрет слева, текст справа. Полупрозрачный фон продолжает комнату. */}
+      <div
+        className="flex items-center gap-3 px-3 py-2.5"
+        style={{
+          background: "rgba(10, 15, 28, 0.74)",
+          borderTop: "1px solid var(--card-edge)",
+          backdropFilter: "blur(6px)",
+        }}
+      >
+        <img
+          src={faceForMood(mood)}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className="shrink-0 select-none rounded-lg object-cover"
+          style={{
+            width: PORTRAIT_SIZE_PX,
+            height: PORTRAIT_SIZE_PX,
+            border: "1px solid var(--card-edge)",
+          }}
+        />
+        <p
+          aria-live="polite"
+          className="min-w-0 flex-1 text-[13px] leading-snug text-[var(--ink)] transition-opacity duration-700"
+          style={{ opacity: message ? 1 : 0 }}
+        >
+          {message ?? ""}
+        </p>
       </div>
     </section>
   );
