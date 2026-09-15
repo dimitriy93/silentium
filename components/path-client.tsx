@@ -63,7 +63,7 @@ export default function PathClient() {
     <div className="space-y-5">
       {/* Иллюстрация текущего состояния пути: кроссфейд в контейнере стабильной пропорции */}
       <div
-        className="relative mx-auto aspect-[400/580] w-full"
+        className="relative mx-auto aspect-[650/350] w-full"
         aria-live="polite"
       >
         {PATH_IMAGES.map(({ key, src, alt }) => (
