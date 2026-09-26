@@ -1,22 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import {
-  createThought,
-  deleteThought,
-  listThoughts,
-  updateThought,
-} from "@/actions/thoughts";
-import type { Thought } from "@/lib/db/schema";
+import { useEffect, useState } from "react";
+import { useCacheQuery } from "@/hooks/use-cache-query";
+import { usePendingRows } from "@/hooks/use-pending-rows";
+import { readAllThoughts } from "@/lib/local/queries";
+import { writes } from "@/lib/local/mutations";
+import type { LocalThought } from "@/lib/local/types";
 import { formatDateHeader, todayLocalDate } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
+import PendingDot from "@/components/pending-dot";
 
 /**
  * Лента мыслей: быстрый ввод сверху, группировка по датам, редактирование
  * и удаление на месте. Дата и время записи — локальные для пользователя.
+ *
+ * Все мутации идут через локальный путь (кеш + outbox, этап 2): запись
+ * появляется мгновенно, при сети сразу уходит в Башню, офлайн — ждёт в
+ * очереди. Несинхронизированные записи помечены бронзовой точкой.
  */
 export default function ThoughtsClient() {
-  const [thoughts, setThoughts] = useState<Thought[] | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -24,59 +26,46 @@ export default function ThoughtsClient() {
   const [editDraft, setEditDraft] = useState("");
   const [today, setToday] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    const res = await listThoughts();
-    if (res.ok) {
-      setThoughts(res.data);
-    } else {
-      setError(res.error);
-    }
-  }, []);
+  const thoughts = useCacheQuery(readAllThoughts, []);
+  const pendingIds = usePendingRows("thought");
 
   useEffect(() => {
     setToday(todayLocalDate());
-    void reload();
-  }, [reload]);
+  }, []);
 
   async function handleCreate() {
     const content = draft.trim();
     if (!content || saving) return;
     setSaving(true);
     setError(null);
-    const res = await createThought(todayLocalDate(), content);
+    const res = await writes.addThought(todayLocalDate(), content);
     setSaving(false);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setDraft("");
-    await reload();
   }
 
   async function handleSaveEdit(id: string) {
     const content = editDraft.trim();
     if (!content) return;
-    const res = await updateThought(id, content);
+    const res = await writes.updateThought(id, content);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setEditingId(null);
-    await reload();
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Удалить запись?")) return;
-    const res = await deleteThought(id);
-    if (!res.ok) {
-      setError(res.error);
-      return;
-    }
-    await reload();
+    const res = await writes.deleteThought(id);
+    if (!res.ok) setError(res.error);
   }
 
   // Группировка по entry_date, дни — новые сверху.
-  const groups = new Map<string, Thought[]>();
+  const groups = new Map<string, LocalThought[]>();
   for (const t of thoughts ?? []) {
     const list = groups.get(t.entryDate) ?? [];
     list.push(t);
@@ -163,12 +152,15 @@ export default function ThoughtsClient() {
                           {t.content}
                         </p>
                         <div className="mt-1.5 flex items-center justify-between">
-                          <time className="text-xs text-[var(--ink-faint)]">
-                            {new Date(t.createdAt).toLocaleTimeString("ru-RU", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </time>
+                          <span className="flex items-center gap-1.5">
+                            <time className="text-xs text-[var(--ink-faint)]">
+                              {new Date(t.createdAt).toLocaleTimeString("ru-RU", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </time>
+                            {pendingIds.has(t.id) ? <PendingDot /> : null}
+                          </span>
                           <div className="flex gap-3 text-xs">
                             <button
                               type="button"

@@ -3,23 +3,22 @@
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import OrbitalLoader from "@/components/orbital-loader";
-import {
-  createCreationEntry,
-  createLearningEntry,
-  createTrainingActivity,
-  deleteCreationEntry,
-  deleteLearningEntry,
-  deleteTrainingActivity,
-  getPathDay,
-  saveNutrition,
-  type PathDay,
-} from "@/actions/path";
+import PendingDot from "@/components/pending-dot";
+import { useCacheQuery } from "@/hooks/use-cache-query";
+import { usePendingRows } from "@/hooks/use-pending-rows";
+import { readPathDay } from "@/lib/local/queries";
+import { writes } from "@/lib/local/mutations";
+import type { LocalPathDay } from "@/lib/local/types";
 import { todayLocalDate } from "@/lib/format";
 
 /**
  * Раздел «Путь»: четыре стихии на вкладках.
  * ОГОНЬ — журнал активности; ВОДА — КБЖУ + заметка (одна запись на день);
  * ВОЗДУХ — «я изучил»; ЗЕМЛЯ — «я создал».
+ *
+ * Данные дня мгновенно читаются из локального кеша; все мутации идут через
+ * локальный путь (кеш + outbox): запись появляется мгновенно, при сети сразу
+ * уходит в Башню, офлайн — ждёт в очереди (бронзовая точка у записи).
  */
 
 const TABS = [
@@ -43,21 +42,16 @@ const PATH_IMAGES = [
 
 export default function PathClient() {
   const [tab, setTab] = useState<TabKey | null>(null);
-  const [day, setDay] = useState<PathDay | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [hydratedDate, setHydratedDate] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    const res = await getPathDay(todayLocalDate());
-    if (res.ok) {
-      setDay(res.data);
-    } else {
-      setError(res.error);
-    }
-  }, []);
+  const day = useCacheQuery<LocalPathDay>(
+    useCallback(async () => readPathDay(hydratedDate ?? ""), [hydratedDate]),
+    [hydratedDate],
+  );
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    setHydratedDate(todayLocalDate());
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -118,49 +112,69 @@ export default function PathClient() {
         ))}
       </nav>
 
-      {error ? <p className="text-sm text-[#c96a5a]">{error}</p> : null}
       {day === null ? (
         <OrbitalLoader label="Читаю хронику…" className="py-10" />
       ) : (
         <>
-          {tab === "ogon" && <FireTab day={day} reload={reload} />}
-          {tab === "voda" && <WaterTab day={day} reload={reload} />}
-          {tab === "vozduh" && <AirTab day={day} reload={reload} />}
-          {tab === "zemlya" && <EarthTab day={day} reload={reload} />}
+          {tab === "ogon" && <FireTab day={day} />}
+          {tab === "voda" && <WaterTab day={day} />}
+          {tab === "vozduh" && <AirTab day={day} />}
+          {tab === "zemlya" && <EarthTab day={day} />}
         </>
       )}
     </div>
   );
 }
 
-type TabProps = { day: PathDay; reload: () => Promise<void> };
+type TabProps = { day: LocalPathDay };
 
-function EntryActions({ onDelete }: { onDelete: () => void }) {
+/** Строка записи с меткой несинхронизированности. */
+function EntryRow({
+  pending,
+  children,
+  onDelete,
+}: {
+  pending: boolean;
+  children: React.ReactNode;
+  onDelete: () => void;
+}) {
   return (
-    <button
-      type="button"
-      className="shrink-0 text-xs text-[#a05a4e] active:text-[#c96a5a]"
-      onClick={onDelete}
-    >
-      Удалить
-    </button>
+    <li className="flex items-start justify-between gap-3 px-4 py-3">
+      <div className="min-w-0">
+        {children}
+        {pending ? (
+          <span className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--ink-faint)]">
+            <PendingDot />
+            ещё не отправлено
+          </span>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        className="shrink-0 text-xs text-[#a05a4e] active:text-[#c96a5a]"
+        onClick={onDelete}
+      >
+        Удалить
+      </button>
+    </li>
   );
 }
 
 // ---------- ОГОНЬ ----------
 
-function FireTab({ day, reload }: TabProps) {
+function FireTab({ day }: TabProps) {
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const [minutes, setMinutes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingIds = usePendingRows("training");
 
   async function submit() {
     if (!title.trim() || saving) return;
     setSaving(true);
     setError(null);
-    const res = await createTrainingActivity(
+    const res = await writes.addTraining(
       todayLocalDate(),
       title.trim(),
       detail.trim() || null,
@@ -174,7 +188,6 @@ function FireTab({ day, reload }: TabProps) {
     setTitle("");
     setDetail("");
     setMinutes("");
-    await reload();
   }
 
   return (
@@ -226,20 +239,19 @@ function FireTab({ day, reload }: TabProps) {
       ) : (
         <ul className="bronze-card divide-y divide-[var(--card-edge)]">
           {day.training.map((t) => (
-            <li key={t.id} className="flex items-start justify-between gap-3 px-4 py-3">
-              <div>
-                <p className="text-[15px] font-medium">{t.title}</p>
-                {t.detail ? <p className="text-sm text-[var(--gold)]">{t.detail}</p> : null}
-                {t.durationMinutes ? (
-                  <p className="text-xs text-[var(--ink-faint)]">{t.durationMinutes} мин</p>
-                ) : null}
-              </div>
-              <EntryActions
-                onDelete={() => {
-                  if (confirm("Удалить запись?")) void deleteTrainingActivity(t.id).then(reload);
-                }}
-              />
-            </li>
+            <EntryRow
+              key={t.id}
+              pending={pendingIds.has(t.id)}
+              onDelete={() => {
+                if (confirm("Удалить запись?")) void writes.deleteTraining(t.id);
+              }}
+            >
+              <p className="text-[15px] font-medium">{t.title}</p>
+              {t.detail ? <p className="text-sm text-[var(--gold)]">{t.detail}</p> : null}
+              {t.durationMinutes ? (
+                <p className="text-xs text-[var(--ink-faint)]">{t.durationMinutes} мин</p>
+              ) : null}
+            </EntryRow>
           ))}
         </ul>
       )}
@@ -249,7 +261,7 @@ function FireTab({ day, reload }: TabProps) {
 
 // ---------- ВОДА ----------
 
-function WaterTab({ day, reload }: TabProps) {
+function WaterTab({ day }: TabProps) {
   const [calories, setCalories] = useState(
     day.nutrition?.calories != null ? String(day.nutrition.calories) : "",
   );
@@ -270,7 +282,7 @@ function WaterTab({ day, reload }: TabProps) {
     if (saving) return;
     setSaving(true);
     setError(null);
-    const res = await saveNutrition(todayLocalDate(), {
+    const res = await writes.saveNutrition(todayLocalDate(), {
       calories: calories ? Number(calories) : null,
       proteinGrams: protein ? Number(protein) : null,
       fatGrams: fat ? Number(fat) : null,
@@ -282,7 +294,6 @@ function WaterTab({ day, reload }: TabProps) {
       setError(res.error);
       return;
     }
-    await reload();
   }
 
   return (
@@ -370,23 +381,23 @@ function WaterTab({ day, reload }: TabProps) {
 
 // ---------- ВОЗДУХ ----------
 
-function AirTab({ day, reload }: TabProps) {
+function AirTab({ day }: TabProps) {
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingIds = usePendingRows("learning");
 
   async function submit() {
     if (!content.trim() || saving) return;
     setSaving(true);
     setError(null);
-    const res = await createLearningEntry(todayLocalDate(), content.trim());
+    const res = await writes.addLearning(todayLocalDate(), content.trim());
     setSaving(false);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setContent("");
-    await reload();
   }
 
   return (
@@ -428,14 +439,15 @@ function AirTab({ day, reload }: TabProps) {
       ) : (
         <ul className="bronze-card divide-y divide-[var(--card-edge)]">
           {day.learning.map((t) => (
-            <li key={t.id} className="flex items-start justify-between gap-3 px-4 py-3">
+            <EntryRow
+              key={t.id}
+              pending={pendingIds.has(t.id)}
+              onDelete={() => {
+                if (confirm("Удалить запись?")) void writes.deleteLearning(t.id);
+              }}
+            >
               <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{t.content}</p>
-              <EntryActions
-                onDelete={() => {
-                  if (confirm("Удалить запись?")) void deleteLearningEntry(t.id).then(reload);
-                }}
-              />
-            </li>
+            </EntryRow>
           ))}
         </ul>
       )}
@@ -445,23 +457,23 @@ function AirTab({ day, reload }: TabProps) {
 
 // ---------- ЗЕМЛЯ ----------
 
-function EarthTab({ day, reload }: TabProps) {
+function EarthTab({ day }: TabProps) {
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingIds = usePendingRows("creation");
 
   async function submit() {
     if (!content.trim() || saving) return;
     setSaving(true);
     setError(null);
-    const res = await createCreationEntry(todayLocalDate(), content.trim());
+    const res = await writes.addCreation(todayLocalDate(), content.trim());
     setSaving(false);
     if (!res.ok) {
       setError(res.error);
       return;
     }
     setContent("");
-    await reload();
   }
 
   return (
@@ -503,14 +515,15 @@ function EarthTab({ day, reload }: TabProps) {
       ) : (
         <ul className="bronze-card divide-y divide-[var(--card-edge)]">
           {day.creation.map((t) => (
-            <li key={t.id} className="flex items-start justify-between gap-3 px-4 py-3">
+            <EntryRow
+              key={t.id}
+              pending={pendingIds.has(t.id)}
+              onDelete={() => {
+                if (confirm("Удалить запись?")) void writes.deleteCreation(t.id);
+              }}
+            >
               <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{t.content}</p>
-              <EntryActions
-                onDelete={() => {
-                  if (confirm("Удалить запись?")) void deleteCreationEntry(t.id).then(reload);
-                }}
-              />
-            </li>
+            </EntryRow>
           ))}
         </ul>
       )}

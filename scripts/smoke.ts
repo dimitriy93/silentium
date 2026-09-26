@@ -56,6 +56,12 @@ function check(name: string, condition: boolean, detail?: string) {
   }
 }
 
+/** create-функции lib-слоя допускают null (идемпотентный повтор) — здесь строки всегда новые. */
+function must<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) throw new Error(`smoke: ${what} не создан`);
+  return value;
+}
+
 async function main() {
   // SMOKE_ADMIN_URL — подключение с правами владельца (сеять/чистить auth.users).
   // DATABASE_URL — роль приложения (не суперпользователь): только через RLS.
@@ -99,7 +105,7 @@ async function main() {
     check("триггер создаёт rpg_profile (level=1, xp=0)", rpg?.level === 1 && rpg?.xp === 0);
 
     // Мысли.
-    const thought = await createThought(userId, date, "Первая мысль о дисциплине");
+    const thought = must(await createThought(userId, date, "Первая мысль о дисциплине"), "мысль");
     check("создание мысли", thought.content === "Первая мысль о дисциплине");
     await updateThought(userId, thought.id, "Отредактированная мысль");
     const dayThoughts = await listThoughtsForDay(userId, date);
@@ -108,11 +114,14 @@ async function main() {
     check("мысль удалена", (await listThoughtsForDay(userId, date)).length === 0);
 
     // Путь: Огонь.
-    const training = await createTrainingActivity(userId, date, {
-      title: "Подтягивания",
-      detail: "+31.5 кг × 6/6/5/5",
-      durationMinutes: 45,
-    });
+    const training = must(
+      await createTrainingActivity(userId, date, {
+        title: "Подтягивания",
+        detail: "+31.5 кг × 6/6/5/5",
+        durationMinutes: 45,
+      }),
+      "тренировка",
+    );
     check("огонь: запись активности", (await listTrainingForDay(userId, date)).length === 1);
     check("огонь: удаление", await deleteTrainingActivity(userId, training.id));
 
@@ -140,10 +149,13 @@ async function main() {
     check("развлечения: запись", leisure.length === 1 && leisure[0].minutes === 20);
 
     // Аскезы.
-    const asceticism = await createAsceticism(userId, {
-      title: "Не смотреть короткие видео",
-      startDate: date,
-    });
+    const asceticism = must(
+      await createAsceticism(userId, {
+        title: "Не смотреть короткие видео",
+        startDate: date,
+      }),
+      "аскеза",
+    );
     const list = await listAsceticisms(userId);
     check("аскеза: создание", list.length === 1 && list[0].isActive);
     await setAsceticismLog(userId, asceticism.id, date, "done");
@@ -163,10 +175,13 @@ async function main() {
     };
 
     // 1. Новая аскеза: строка серии создана сразу, серия нулевая.
-    const streakAsc = await createAsceticism(userId, {
-      title: "Серия: не пропускать зарядку",
-      startDate: shift(-400),
-    });
+    const streakAsc = must(
+      await createAsceticism(userId, {
+        title: "Серия: не пропускать зарядку",
+        startDate: shift(-400),
+      }),
+      "аскеза серии",
+    );
     const streaks1 = await ensureAsceticismStreaks(userId, date);
     const s1 = streaks1.find((s) => s.asceticismId === streakAsc.id);
     check(
@@ -259,10 +274,13 @@ async function main() {
     );
 
     // 8. Backfill по существующей истории: аскеза со старыми done-отметками.
-    const backfillAsc = await createAsceticism(userId, {
-      title: "Backfill: серия из истории",
-      startDate: shift(-6),
-    });
+    const backfillAsc = must(
+      await createAsceticism(userId, {
+        title: "Backfill: серия из истории",
+        startDate: shift(-6),
+      }),
+      "backfill-аскеза",
+    );
     for (let off = -6; off <= -4; off++) {
       await setAsceticismLog(userId, backfillAsc.id, shift(off), "done", date);
     }

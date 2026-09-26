@@ -24,9 +24,20 @@ export interface AsceticismAchievement {
 export async function createAsceticism(
   userId: string,
   values: { title: string; description?: string | null; startDate: string },
-): Promise<Asceticism> {
+  options: { id?: string; createdAt?: Date } = {},
+): Promise<Asceticism | null> {
   return withUserDb(userId, async (tx) => {
-    const [row] = await tx.insert(asceticisms).values({ userId, ...values }).returning();
+    const [row] = await tx
+      .insert(asceticisms)
+      .values({
+        userId,
+        ...values,
+        ...(options.id ? { id: options.id } : {}),
+        ...(options.createdAt ? { createdAt: options.createdAt } : {}),
+      })
+      .onConflictDoNothing({ target: asceticisms.id })
+      .returning();
+    if (!row) return null; // идемпотентный повтор: строка уже есть
     // Серия стартует с нуля; строка сразу, чтобы первый «сегодня» не писал при чтении.
     await tx.insert(asceticismStreaks).values({ asceticismId: row.id, userId });
     return row;
@@ -73,6 +84,8 @@ export async function listAsceticisms(userId: string): Promise<Asceticism[]> {
  * Отметка за день: 'done' | 'failed'. Повторная отметка меняет статус.
  * status = null снимает отметку (удаляет строку).
  * После изменения отметки пересчитывается серия аскезы.
+ * options.id — клиентский UUID строки (pushOutbox): повторная отправка
+ * вставляет ту же строку, конфликт решается по natural key.
  */
 export async function setAsceticismLog(
   userId: string,
@@ -80,6 +93,7 @@ export async function setAsceticismLog(
   entryDate: string,
   status: "done" | "failed" | null,
   today?: string,
+  options: { id?: string } = {},
 ): Promise<void> {
   await withUserDb(userId, async (tx) => {
     if (status === null) {
@@ -95,7 +109,13 @@ export async function setAsceticismLog(
     } else {
       await tx
         .insert(asceticismLogs)
-        .values({ asceticismId, userId, entryDate, status })
+        .values({
+          asceticismId,
+          userId,
+          entryDate,
+          status,
+          ...(options.id ? { id: options.id } : {}),
+        })
         .onConflictDoUpdate({
           target: [asceticismLogs.asceticismId, asceticismLogs.entryDate],
           set: { status },

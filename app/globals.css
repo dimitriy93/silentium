@@ -113,6 +113,46 @@ body {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
 }
 
+/* Меню центральной кнопки нижней навигации: короткое появление
+   снизу вверх, пункты догоняют с микро-задержкой. Только transform +
+   opacity. Меню позиционируется абсолютно — layout не сдвигается. */
+.nav-menu {
+  transform-origin: bottom center;
+  animation: nav-menu-pop 160ms ease-out;
+}
+.nav-menu-item {
+  animation: nav-item-rise 180ms ease-out backwards;
+}
+.nav-menu-item:nth-child(2) {
+  animation-delay: 45ms;
+}
+@keyframes nav-menu-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes nav-item-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-menu,
+  .nav-menu-item {
+    animation: none;
+  }
+}
+
 /* Разделитель ленты — линия-гравировка */
 .engraved-line {
   height: 1px;

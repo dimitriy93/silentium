@@ -17,8 +17,7 @@ import {
   roomPeriodForHour,
   type RoomPeriod,
 } from "@/lib/avatar/room";
-import type { PathDay } from "@/actions/path";
-import type { AsceticismDay } from "@/actions/asceticism";
+import type { LocalPathDay, LocalAsceticismDay } from "@/lib/local/types";
 
 /**
  * «Живая комната» — карточка-секция на экране «Сегодня».
@@ -56,7 +55,7 @@ function faceForMood(mood: Mood): string {
 }
 
 /** Факты дня из загруженных записей: Путь, аскезы, развлечения. */
-function dayFacts(path: PathDay | null, asceticism: AsceticismDay | null): DayFacts {
+function dayFacts(path: LocalPathDay | null, asceticism: LocalAsceticismDay | null): DayFacts {
   if (!path) return EMPTY_FACTS;
   const done = asceticism?.logs.filter((l) => l.status === "done").length ?? 0;
   const failed = asceticism?.logs.filter((l) => l.status === "failed").length ?? 0;
@@ -77,8 +76,8 @@ export default function AvatarRoom({
   path,
   asceticism,
 }: {
-  path: PathDay | null;
-  asceticism: AsceticismDay | null;
+  path: LocalPathDay | null;
+  asceticism: LocalAsceticismDay | null;
 }) {
   // Период и час вычисляются только на клиенте — без рассинхрона гидратации.
   const [period, setPeriod] = useState<RoomPeriod | null>(null);

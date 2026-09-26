@@ -2,60 +2,65 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { createThought, listThoughtsForDay } from "@/actions/thoughts";
+import { useCacheQuery } from "@/hooks/use-cache-query";
 import {
-  getAsceticismAchievements,
-  getAsceticismDay,
-  setAsceticismLog,
-  type AsceticismAchievementView,
-  type AsceticismDay,
-} from "@/actions/asceticism";
-import { getDayStreak, type DayStreakView } from "@/actions/day-streak";
-import { getPathDay, type PathDay } from "@/actions/path";
-import { listLeisureForDay } from "@/actions/leisure";
-import type { LeisureEntry } from "@/lib/db/schema";
-import type { Thought } from "@/lib/db/schema";
+  readAsceticismAchievements,
+  readDayStreakView,
+  readLeisureForDay,
+  readPathDay,
+  readThoughtsForDay,
+  readAsceticismDay,
+} from "@/lib/local/queries";
+import { writes } from "@/lib/local/mutations";
+import type {
+  LocalAchievement,
+  LocalAsceticismDay,
+  LocalLeisure,
+  LocalPathDay,
+  LocalThought,
+} from "@/lib/local/types";
 import { formatDateRu, formatMinutes, formatWeekdayRu, todayLocalDate } from "@/lib/format";
 import { displayStreak, pluralDays } from "@/lib/asceticism-streak";
 import OrbitalLoader from "@/components/orbital-loader";
+import PendingDot from "@/components/pending-dot";
+import { usePendingRows } from "@/hooks/use-pending-rows";
 import AvatarRoom from "@/components/avatar-room/avatar-room";
 
 /**
  * Главный экран «Сегодня»: дата, быстрый ввод мысли, сводка Пути,
  * развлечения, отметки аскез и наставник. Дата вычисляется на клиенте —
  * «сегодня» всегда локальное для пользователя.
+ *
+ * Данные читаются из локального кеша (IndexedDB) — экран открывается
+ * мгновенно. Мутации идут через локальный путь (кеш + outbox, этап 2):
+ * запись появляется мгновенно, при сети сразу уходит в Башню, офлайн —
+ * ждёт в очереди.
  */
 export default function TodayClient() {
   const [today, setToday] = useState<string | null>(null);
-  const [thoughts, setThoughts] = useState<Thought[] | null>(null);
-  const [path, setPath] = useState<PathDay | null>(null);
-  const [leisure, setLeisure] = useState<LeisureEntry[] | null>(null);
-  const [asceticism, setAsceticism] = useState<AsceticismDay | null>(null);
-  const [achievements, setAchievements] = useState<AsceticismAchievementView[] | null>(null);
-  const [dayStreak, setDayStreak] = useState<DayStreakView | null>(null);
 
-  const reload = useCallback(async () => {
-    const date = todayLocalDate();
-    const [thoughtsRes, pathRes, leisureRes, asceticismRes, achievementsRes, dayStreakRes] = await Promise.all([
-      listThoughtsForDay(date),
-      getPathDay(date),
-      listLeisureForDay(date),
-      getAsceticismDay(date),
-      getAsceticismAchievements(),
-      getDayStreak(date),
-    ]);
-    if (thoughtsRes.ok) setThoughts(thoughtsRes.data);
-    if (pathRes.ok) setPath(pathRes.data);
-    if (leisureRes.ok) setLeisure(leisureRes.data);
-    if (asceticismRes.ok) setAsceticism(asceticismRes.data);
-    if (achievementsRes.ok) setAchievements(achievementsRes.data);
-    if (dayStreakRes.ok) setDayStreak(dayStreakRes.data);
-  }, []);
+  const thoughts = useCacheQuery<LocalThought[]>(
+    useCallback(async () => (today ? readThoughtsForDay(today) : null), [today]),
+    [today],
+  );
+  const path = useCacheQuery<LocalPathDay>(
+    useCallback(async () => (today ? readPathDay(today) : null), [today]),
+    [today],
+  );
+  const leisure = useCacheQuery<LocalLeisure[]>(
+    useCallback(async () => (today ? readLeisureForDay(today) : null), [today]),
+    [today],
+  );
+  const asceticism = useCacheQuery<LocalAsceticismDay>(
+    useCallback(async () => (today ? readAsceticismDay(today) : null), [today]),
+    [today],
+  );
+  const achievements = useCacheQuery(readAsceticismAchievements, []);
+  const dayStreak = useCacheQuery(readDayStreakView, []);
 
   useEffect(() => {
     setToday(todayLocalDate());
-    void reload();
-  }, [reload]);
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -77,10 +82,10 @@ export default function TodayClient() {
 
       <AchievementsCard achievements={achievements} dayStreak={dayStreak} />
 
-      <ThoughtsCard thoughts={thoughts} reload={reload} />
+      <ThoughtsCard thoughts={thoughts} />
       <PathCard path={path} />
       <LeisureCard leisure={leisure} />
-      <AsceticismCard asceticism={asceticism} reload={reload} today={today} />
+      <AsceticismCard asceticism={asceticism} today={today} />
       <MentorCard />
     </div>
   );
@@ -119,7 +124,11 @@ function Empty({ text }: { text: string }) {
  * Активная серия — золотая, отсутствующая — серая с подсказкой.
  * Декор: бронзовые уголки и тонкий орнамент-разделитель.
  */
-function DayStreakCard({ streak }: { streak: DayStreakView | null }) {
+function DayStreakCard({
+  streak,
+}: {
+  streak: { currentStreak: number; longestStreak: number; bestMilestone: number; lastActiveDate: string | null } | null;
+}) {
   const active = (streak?.currentStreak ?? 0) > 0;
   const n = streak?.currentStreak ?? 0;
 
@@ -169,26 +178,24 @@ function DayStreakCard({ streak }: { streak: DayStreakView | null }) {
 
 // ---------- Мысли ----------
 
-function ThoughtsCard({
-  thoughts,
-  reload,
-}: {
-  thoughts: Thought[] | null;
-  reload: () => Promise<void>;
-}) {
+function ThoughtsCard({ thoughts }: { thoughts: LocalThought[] | null }) {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pendingIds = usePendingRows("thought");
 
   async function submit() {
     const content = draft.trim();
     if (!content || saving) return;
     setSaving(true);
-    const res = await createThought(todayLocalDate(), content);
+    setError(null);
+    const res = await writes.addThought(todayLocalDate(), content);
     setSaving(false);
-    if (res.ok) {
-      setDraft("");
-      await reload();
+    if (!res.ok) {
+      setError(res.error);
+      return;
     }
+    setDraft("");
   }
 
   return (
@@ -215,15 +222,17 @@ function ThoughtsCard({
         >
           {saving ? "Записываю…" : "Записать"}
         </button>
+        {error ? <p className="text-sm text-[#c96a5a]">{error}</p> : null}
         {thoughts !== null && thoughts.length > 0 ? (
           <ul className="space-y-1.5 pt-1">
             {thoughts.slice(0, 3).map((t) => (
               <li key={t.id} className="line-clamp-2 text-sm text-[var(--ink-secondary)]">
-                <span className="mr-2 text-xs text-[var(--ink-faint)]">
+                <span className="mr-2 inline-flex items-center gap-1.5 text-xs text-[var(--ink-faint)]">
                   {new Date(t.createdAt).toLocaleTimeString("ru-RU", {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
+                  {pendingIds.has(t.id) ? <PendingDot /> : null}
                 </span>
                 {t.content}
               </li>
@@ -244,7 +253,7 @@ function ThoughtsCard({
 
 // ---------- Путь ----------
 
-function PathCard({ path }: { path: PathDay | null }) {
+function PathCard({ path }: { path: LocalPathDay | null }) {
   const n = path;
   const nutrition = n?.nutrition;
   return (
@@ -334,7 +343,7 @@ function PathRow({
 
 // ---------- Развлечения ----------
 
-function LeisureCard({ leisure }: { leisure: LeisureEntry[] | null }) {
+function LeisureCard({ leisure }: { leisure: LocalLeisure[] | null }) {
   const total = (leisure ?? []).reduce((sum, e) => sum + (e.minutes ?? 0), 0);
   return (
     <CardShell title="Развлечения" href="/leisure">
@@ -360,11 +369,9 @@ function LeisureCard({ leisure }: { leisure: LeisureEntry[] | null }) {
 
 function AsceticismCard({
   asceticism,
-  reload,
   today,
 }: {
-  asceticism: AsceticismDay | null;
-  reload: () => Promise<void>;
+  asceticism: LocalAsceticismDay | null;
   today: string | null;
 }) {
   const active = asceticism?.list.filter((a) => a.isActive) ?? [];
@@ -376,13 +383,12 @@ function AsceticismCard({
     if (!today || pendingMark) return;
     setPendingMark({ id, status });
     setMarkError(null);
-    const res = await setAsceticismLog(id, today, status, today);
+    const res = await writes.setAsceticismLog(id, today, status);
     setPendingMark(null);
     if (!res.ok) {
       setMarkError(res.error);
       return;
     }
-    await reload();
   }
 
   return (
@@ -508,8 +514,8 @@ function AchievementsCard({
   achievements,
   dayStreak,
 }: {
-  achievements: AsceticismAchievementView[] | null;
-  dayStreak: DayStreakView | null;
+  achievements: LocalAchievement[] | null;
+  dayStreak: { bestMilestone: number } | null;
 }) {
   const items: AchievementItem[] = [
     ...(achievements ?? []).map((a) => ({ key: `asc-${a.asceticismId}`, title: a.title, milestone: a.milestone })),

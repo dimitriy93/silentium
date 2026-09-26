@@ -1,15 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  createAsceticism,
-  deleteAsceticism,
-  getAsceticismDay,
-  setAsceticismLog,
-  updateAsceticism,
-  type AsceticismDay,
-} from "@/actions/asceticism";
-import type { Asceticism } from "@/lib/db/schema";
+import { useCacheQuery } from "@/hooks/use-cache-query";
+import { readAsceticismDay } from "@/lib/local/queries";
+import { writes } from "@/lib/local/mutations";
+import type { LocalAsceticismDay, LocalAsceticism } from "@/lib/local/types";
 import { formatDateRu, todayLocalDate } from "@/lib/format";
 import { displayStreak, pluralDays } from "@/lib/asceticism-streak";
 import OrbitalLoader from "@/components/orbital-loader";
@@ -17,39 +12,36 @@ import OrbitalLoader from "@/components/orbital-loader";
 /**
  * Раздел «Аскезы»: список правил + отметка за сегодня (выполнено / не
  * выполнено), создание и редактирование, серии и награды.
+ *
+ * Список мгновенно читается из локального кеша; все мутации идут через
+ * локальный путь (кеш + outbox): отметки и новые аскезы появляются
+ * мгновенно, при сети сразу уходят в Башню, офлайн — ждут в очереди.
  */
 export default function AsceticismClient() {
-  const [data, setData] = useState<AsceticismDay | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [today, setToday] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    const res = await getAsceticismDay(todayLocalDate());
-    if (res.ok) setData(res.data);
-    else setError(res.error);
-  }, []);
+  const data = useCacheQuery<LocalAsceticismDay>(
+    useCallback(async () => (today ? readAsceticismDay(today) : null), [today]),
+    [today],
+  );
 
   useEffect(() => {
     setToday(todayLocalDate());
-    void reload();
-  }, [reload]);
+  }, []);
 
   return (
     <div className="space-y-5">
-      {error ? <p className="text-sm text-[#c96a5a]">{error}</p> : null}
-
       {data === null ? (
         <OrbitalLoader label="Читаю хронику…" className="py-10" />
       ) : (
         <>
-          <AsceticismList data={data} reload={reload} today={today} />
+          <AsceticismList data={data} today={today} />
 
           {showForm ? (
             <CreateForm
               onDone={async () => {
                 setShowForm(false);
-                await reload();
               }}
             />
           ) : (
@@ -67,15 +59,7 @@ export default function AsceticismClient() {
   );
 }
 
-function AsceticismList({
-  data,
-  reload,
-  today,
-}: {
-  data: AsceticismDay;
-  reload: () => Promise<void>;
-  today: string | null;
-}) {
+function AsceticismList({ data, today }: { data: LocalAsceticismDay; today: string | null }) {
   if (data.list.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-[var(--ink-faint)]">
@@ -96,7 +80,6 @@ function AsceticismList({
             asceticism={a}
             log={log}
             streak={streak}
-            reload={reload}
             today={today}
           />
         );
@@ -109,13 +92,11 @@ function AsceticismCard({
   asceticism: a,
   log,
   streak,
-  reload,
   today,
 }: {
-  asceticism: Asceticism;
-  log: AsceticismDay["logs"][number] | undefined;
+  asceticism: LocalAsceticism;
+  log: LocalAsceticismDay["logs"][number] | undefined;
   streak: number;
-  reload: () => Promise<void>;
   today: string | null;
 }) {
   /** Отметка, запрос которой сейчас выполняется: показываем лоадер только на ней. */
@@ -127,13 +108,9 @@ function AsceticismCard({
     if (pendingStatus || !today) return;
     setPendingStatus(status);
     setMarkError(null);
-    const res = await setAsceticismLog(a.id, today, status, today);
+    const res = await writes.setAsceticismLog(a.id, today, status);
     setPendingStatus(null);
-    if (!res.ok) {
-      setMarkError(res.error);
-      return;
-    }
-    await reload();
+    if (!res.ok) setMarkError(res.error);
   }
 
   return (
@@ -149,7 +126,7 @@ function AsceticismCard({
             {a.isActive && streak > 0 ? ` · серия ${pluralDays(streak)}` : ""}
           </p>
         </div>
-        <CardMenu asceticism={a} reload={reload} />
+        <CardMenu asceticism={a} />
       </div>
       {a.description ? (
         <p className="mt-1.5 text-sm leading-relaxed text-[var(--ink-secondary)]">
@@ -239,32 +216,38 @@ function ButtonSpinner() {
   );
 }
 
-function CardMenu({ asceticism: a, reload }: { asceticism: Asceticism; reload: () => Promise<void> }) {
+function CardMenu({ asceticism: a }: { asceticism: LocalAsceticism }) {
+  const [error, setError] = useState<string | null>(null);
+
   async function toggleActive() {
-    await updateAsceticism(a.id, { isActive: !a.isActive }, todayLocalDate());
-    await reload();
+    setError(null);
+    const res = await writes.updateAsceticism(a.id, { isActive: !a.isActive });
+    if (!res.ok) setError(res.error);
   }
 
   return (
-    <div className="flex shrink-0 gap-3 text-xs">
-      <button
-        type="button"
-        className="text-[var(--ink-secondary)] active:text-[var(--gold)]"
-        onClick={() => void toggleActive()}
-      >
-        {a.isActive ? "Отключить" : "Включить"}
-      </button>
-      <button
-        type="button"
-        className="text-[#a05a4e] active:text-[#c96a5a]"
-        onClick={() => {
-          if (confirm("Удалить аскезу? История отметок тоже будет удалена.")) {
-            void deleteAsceticism(a.id).then(reload);
-          }
-        }}
-      >
-        Удалить
-      </button>
+    <div className="flex shrink-0 flex-col items-end gap-2">
+      <div className="flex gap-3 text-xs">
+        <button
+          type="button"
+          className="text-[var(--ink-secondary)] active:text-[var(--gold)]"
+          onClick={() => void toggleActive()}
+        >
+          {a.isActive ? "Отключить" : "Включить"}
+        </button>
+        <button
+          type="button"
+          className="text-[#a05a4e] active:text-[#c96a5a]"
+          onClick={() => {
+            if (confirm("Удалить аскезу? История отметок тоже будет удалена.")) {
+              void writes.deleteAsceticism(a.id);
+            }
+          }}
+        >
+          Удалить
+        </button>
+      </div>
+      {error ? <p className="text-[11px] text-[#c96a5a]">{error}</p> : null}
     </div>
   );
 }
@@ -280,7 +263,7 @@ function CreateForm({ onDone }: { onDone: () => Promise<void> }) {
     if (!title.trim() || saving) return;
     setSaving(true);
     setError(null);
-    const res = await createAsceticism(title.trim(), startDate, description.trim() || null);
+    const res = await writes.addAsceticism(title.trim(), description.trim() || null, startDate);
     setSaving(false);
     if (!res.ok) {
       setError(res.error);

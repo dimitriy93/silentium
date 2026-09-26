@@ -1,37 +1,45 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { createLeisureEntry, deleteLeisureEntry, listLeisureForDay } from "@/actions/leisure";
-import type { LeisureEntry } from "@/lib/db/schema";
+import { useCacheQuery } from "@/hooks/use-cache-query";
+import { usePendingRows } from "@/hooks/use-pending-rows";
+import { readLeisureForDay } from "@/lib/local/queries";
+import { writes } from "@/lib/local/mutations";
+import type { LocalLeisure } from "@/lib/local/types";
 import { formatMinutes, todayLocalDate } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
+import PendingDot from "@/components/pending-dot";
 
 /**
  * Раздел «Развлечения» — честный учёт отдыха и отвлечений. Не система
  * наказаний: задача — видеть реальную картину дня.
+ *
+ * Записи дня мгновенно читаются из локального кеша; мутации идут через
+ * локальный путь (кеш + outbox): запись появляется мгновенно, при сети
+ * сразу уходит в Башню, офлайн — ждёт в очереди.
  */
 export default function LeisureClient() {
-  const [entries, setEntries] = useState<LeisureEntry[] | null>(null);
   const [title, setTitle] = useState("");
   const [minutes, setMinutes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [today, setToday] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    const res = await listLeisureForDay(todayLocalDate());
-    if (res.ok) setEntries(res.data);
-    else setError(res.error);
-  }, []);
+  const entries = useCacheQuery<LocalLeisure[]>(
+    useCallback(async () => (today ? readLeisureForDay(today) : null), [today]),
+    [today],
+  );
+  const pendingIds = usePendingRows("leisure");
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    setToday(todayLocalDate());
+  }, []);
 
   async function submit() {
     if (!title.trim() || saving) return;
     setSaving(true);
     setError(null);
-    const res = await createLeisureEntry(
+    const res = await writes.addLeisure(
       todayLocalDate(),
       title.trim(),
       minutes ? Number(minutes) : null,
@@ -43,7 +51,6 @@ export default function LeisureClient() {
     }
     setTitle("");
     setMinutes("");
-    await reload();
   }
 
   const totalMinutes = (entries ?? []).reduce((sum, e) => sum + (e.minutes ?? 0), 0);
@@ -102,17 +109,23 @@ export default function LeisureClient() {
         <ul className="bronze-card divide-y divide-[var(--card-edge)]">
           {entries.map((e) => (
             <li key={e.id} className="flex items-center justify-between gap-3 px-4 py-3">
-              <div>
+              <div className="min-w-0">
                 <p className="text-[15px] font-medium">{e.title}</p>
                 {e.minutes ? (
                   <p className="text-xs text-[var(--ink-faint)]">{formatMinutes(e.minutes)}</p>
+                ) : null}
+                {pendingIds.has(e.id) ? (
+                  <span className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--ink-faint)]">
+                    <PendingDot />
+                    ещё не отправлено
+                  </span>
                 ) : null}
               </div>
               <button
                 type="button"
                 className="shrink-0 text-xs text-[#a05a4e] active:text-[#c96a5a]"
                 onClick={() => {
-                  if (confirm("Удалить запись?")) void deleteLeisureEntry(e.id).then(reload);
+                  if (confirm("Удалить запись?")) void writes.deleteLeisure(e.id);
                 }}
               >
                 Удалить

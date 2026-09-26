@@ -1,5 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { withUserDb } from "@/lib/db";
+import { clampToNow } from "@/lib/format";
 import {
   creationEntries,
   learningEntries,
@@ -18,7 +19,15 @@ import {
  * ВОДА   → nutrition_entries   (КБЖУ + заметка, одна строка на день)
  * ВОЗДУХ → learning_entries    («я изучил»)
  * ЗЕМЛЯ  → creation_entries    («я создал»)
+ *
+ * Опциональные id/createdAt/clientUpdatedAt — для pushOutbox (этап 2):
+ * идемпотентные повторы и LWW; прежние вызовы работают как раньше.
  */
+
+export interface CreateOptions {
+  id?: string;
+  createdAt?: Date;
+}
 
 // ---------- ОГОНЬ: физическая активность ----------
 
@@ -26,13 +35,21 @@ export async function createTrainingActivity(
   userId: string,
   entryDate: string,
   values: { title: string; detail?: string | null; durationMinutes?: number | null; notes?: string | null },
-): Promise<TrainingActivity> {
+  options: CreateOptions = {},
+): Promise<TrainingActivity | null> {
   return withUserDb(userId, async (tx) => {
     const [row] = await tx
       .insert(trainingActivities)
-      .values({ userId, entryDate, ...values })
+      .values({
+        userId,
+        entryDate,
+        ...values,
+        ...(options.id ? { id: options.id } : {}),
+        ...(options.createdAt ? { createdAt: clampToNow(options.createdAt) } : {}),
+      })
+      .onConflictDoNothing({ target: trainingActivities.id })
       .returning();
-    return row;
+    return row ?? null;
   });
 }
 
@@ -72,13 +89,57 @@ export interface NutritionInput {
 /**
  * Питание — одна строка на день: повторный ввод обновляет значения.
  * (onConflictDoUpdate по unique (user_id, entry_date).)
+ *
+ * С clientUpdatedAt (pushOutbox): LWW — серверная строка новее клиентской
+ * правки не перезаписывается; идемпотентный повтор с той же меткой — no-op.
  */
 export async function upsertNutrition(
   userId: string,
   entryDate: string,
   values: NutritionInput,
-): Promise<NutritionEntry> {
+  options: { id?: string; clientUpdatedAt?: Date } = {},
+): Promise<NutritionEntry | null> {
   return withUserDb(userId, async (tx) => {
+    if (options.clientUpdatedAt) {
+      const clientTs = clampToNow(options.clientUpdatedAt);
+      const [existing] = await tx
+        .select()
+        .from(nutritionEntries)
+        .where(
+          and(eq(nutritionEntries.userId, userId), eq(nutritionEntries.entryDate, entryDate)),
+        );
+      if (existing) {
+        if (existing.updatedAt.getTime() >= clientTs.getTime()) return existing;
+        const [row] = await tx
+          .update(nutritionEntries)
+          .set({ ...values, updatedAt: clientTs })
+          .where(eq(nutritionEntries.id, existing.id))
+          .returning();
+        return row ?? null;
+      }
+      const [row] = await tx
+        .insert(nutritionEntries)
+        .values({
+          userId,
+          entryDate,
+          ...values,
+          ...(options.id ? { id: options.id } : {}),
+          createdAt: clientTs,
+          updatedAt: clientTs,
+        })
+        .onConflictDoNothing({ target: nutritionEntries.id })
+        .returning();
+      if (row) return row;
+      // Конфликт по PK (теоретический) — перечитываем существующую строку.
+      const [again] = await tx
+        .select()
+        .from(nutritionEntries)
+        .where(
+          and(eq(nutritionEntries.userId, userId), eq(nutritionEntries.entryDate, entryDate)),
+        );
+      return again ?? null;
+    }
+
     const [row] = await tx
       .insert(nutritionEntries)
       .values({ userId, entryDate, ...values })
@@ -111,13 +172,21 @@ export async function createLearningEntry(
   userId: string,
   entryDate: string,
   content: string,
-): Promise<LearningEntry> {
+  options: CreateOptions = {},
+): Promise<LearningEntry | null> {
   return withUserDb(userId, async (tx) => {
     const [row] = await tx
       .insert(learningEntries)
-      .values({ userId, entryDate, content })
+      .values({
+        userId,
+        entryDate,
+        content,
+        ...(options.id ? { id: options.id } : {}),
+        ...(options.createdAt ? { createdAt: clampToNow(options.createdAt) } : {}),
+      })
+      .onConflictDoNothing({ target: learningEntries.id })
       .returning();
-    return row;
+    return row ?? null;
   });
 }
 
@@ -150,13 +219,21 @@ export async function createCreationEntry(
   userId: string,
   entryDate: string,
   content: string,
-): Promise<CreationEntry> {
+  options: CreateOptions = {},
+): Promise<CreationEntry | null> {
   return withUserDb(userId, async (tx) => {
     const [row] = await tx
       .insert(creationEntries)
-      .values({ userId, entryDate, content })
+      .values({
+        userId,
+        entryDate,
+        content,
+        ...(options.id ? { id: options.id } : {}),
+        ...(options.createdAt ? { createdAt: clampToNow(options.createdAt) } : {}),
+      })
+      .onConflictDoNothing({ target: creationEntries.id })
       .returning();
-    return row;
+    return row ?? null;
   });
 }
 

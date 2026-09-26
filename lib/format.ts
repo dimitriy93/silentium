@@ -87,6 +87,15 @@ export function todayLocalDate(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+/**
+ * Клиентская метка времени из будущего прижимается к серверному «сейчас» —
+ * защита LWW и сортировки от переведённых часов устройства
+ * (docs/offline-write-sync-design.md, раздел 13).
+ */
+export function clampToNow(date: Date, now: Date = new Date()): Date {
+  return date.getTime() > now.getTime() ? now : date;
+}
+
 /** «12 сентября» + будний день для заголовков ленты: «12 сентября · суббота». */
 export function formatDateHeader(dateStr: string, todayStr: string): string {
   const short = formatDateShortRu(dateStr);

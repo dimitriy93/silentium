@@ -1,5 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { withUserDb } from "@/lib/db";
+import { clampToNow } from "@/lib/format";
 import { leisureEntries, type LeisureEntry } from "@/lib/db/schema";
 
 /** Слой данных «Развлечения» — честный учёт отдыха и отвлечений. */
@@ -8,13 +9,21 @@ export async function createLeisureEntry(
   userId: string,
   entryDate: string,
   values: { title: string; minutes?: number | null; notes?: string | null },
-): Promise<LeisureEntry> {
+  options: { id?: string; createdAt?: Date } = {},
+): Promise<LeisureEntry | null> {
   return withUserDb(userId, async (tx) => {
     const [row] = await tx
       .insert(leisureEntries)
-      .values({ userId, entryDate, ...values })
+      .values({
+        userId,
+        entryDate,
+        ...values,
+        ...(options.id ? { id: options.id } : {}),
+        ...(options.createdAt ? { createdAt: clampToNow(options.createdAt) } : {}),
+      })
+      .onConflictDoNothing({ target: leisureEntries.id })
       .returning();
-    return row;
+    return row ?? null;
   });
 }
 
