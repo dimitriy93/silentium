@@ -4,8 +4,8 @@ import TodayClient from "@/components/today-client";
 
 /**
  * Статическая оболочка экрана: данные читает TodayClient из локальной базы
- * (IndexedDB), доступ проверяет middleware. Рендер не зависит от сети —
- * переход мгновенный и работает офлайн (Local First).
+ * (IndexedDB). Рендер не зависит от сети — переход мгновенный и работает
+ * офлайн.
  */
 export default function TodayPage() {
   return (

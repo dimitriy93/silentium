@@ -3,7 +3,7 @@ import PathClient from "@/components/path-client";
 
 /**
  * Статическая оболочка экрана: данные читает PathClient из локальной базы
- * (IndexedDB), доступ проверяет middleware (Local First).
+ * (IndexedDB) — сервер в рендере не участвует.
  */
 export default function PathPage() {
   return (

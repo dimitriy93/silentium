@@ -5,9 +5,9 @@ import HistoryClient from "@/components/history-client";
 
 /**
  * Статическая оболочка экрана: список дней собирает клиентский HistoryClient
- * из локального кеша (IndexedDB), доступ проверяет middleware. Suspense
+ * из локального кеша (IndexedDB), Suspense
  * удержан: HistoryClient использует useSearchParams, статическому рендеру
- * нужна граница. Данных на сервере нет — fallback пустой (Local First).
+ * нужна граница. Данных на сервере нет — fallback пустой.
  */
 export default function HistoryPage() {
   return (

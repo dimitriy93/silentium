@@ -1,11 +1,10 @@
 "use client";
 
 import { localDb, type LocalDb } from "@/lib/local/db";
-import { isCacheHydrated } from "@/lib/local/writes";
 
 /**
- * «Статистика пути» (Local First): только существующие таблицы Dexie, без
- * новых сущностей и без обращения к серверу. Счётчики — дешёвые подсчёты по
+ * «Статистика пути» (полностью локальное приложение): только существующие
+ * таблицы Dexie, без новых сущностей. Счётчики — дешёвые подсчёты по
  * индексам; дорогая часть (объединение дат активных дней) вычисляется не на
  * каждый вызов, а только когда изменился отпечаток — набор счётчиков всех
  * журнальных таблиц (любое создание, удаление или смена статуса отметки
@@ -59,7 +58,7 @@ let cache: PathStatsCache | null = null;
 
 export async function readPathStats(): Promise<PathStatsView | null> {
   const db = localDb();
-  if (!db || !(await isCacheHydrated())) return null;
+  if (!db) return null;
   try {
     const [thoughts, trainings, nutrition, learning, creations, leisure, logsTotal, asceticismsDone] =
       await Promise.all([

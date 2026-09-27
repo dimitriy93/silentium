@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AvatarSprite from "@/components/avatar/avatar-sprite";
+import { withBasePath } from "@/lib/base-path";
 import { useAvatarBehavior, DEFAULT_AVATAR_BOUNDS } from "@/hooks/avatar/use-avatar-behavior";
 import { useDialogue } from "@/hooks/dialog/use-dialogue";
 import { activityCountOfDay, moodForActivityCount, type Mood } from "@/lib/avatar/mood";
@@ -44,11 +45,11 @@ function roomImageSrc(period: RoomPeriod): string {
  * Известные настроения маппятся явно, неизвестные — на усталое лицо.
  */
 const MOOD_FACE: Record<Mood, string> = {
-  happy: "/avatar/face/happy.png",
-  neutral: "/avatar/face/neutral.png",
-  concerned: "/avatar/face/sad.png",
+  happy: withBasePath("/avatar/face/happy.png"),
+  neutral: withBasePath("/avatar/face/neutral.png"),
+  concerned: withBasePath("/avatar/face/sad.png"),
 };
-const FALLBACK_FACE = "/avatar/face/tired.png";
+const FALLBACK_FACE = withBasePath("/avatar/face/tired.png");
 
 function faceForMood(mood: Mood): string {
   return MOOD_FACE[mood] ?? FALLBACK_FACE;

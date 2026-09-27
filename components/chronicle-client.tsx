@@ -1,50 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchChronicleEvents } from "@/actions/history";
-import { useSync } from "@/lib/local/sync-context";
+import { useLocalData } from "@/lib/local/local-context";
 import { readChronicleEvents } from "@/lib/local/chronicle";
 import type { ChronicleEvent } from "@/lib/chronicle-shared";
 import { formatDateRu } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
 
 /**
- * Хроника Пути: события летописи. Мгновенно строится из локальной базы
- * (readChronicleEvents повторяет серверную сборку в памяти); если кеш ещё
- * не гидратирован (первый запуск) — серверный экшен fetchChronicleEvents,
- * снапшот далее обновит летопись.
+ * Хроника Пути: события летописи. Полностью строится из локальной базы
+ * (readChronicleEvents) — при пустой базе показывается пустая летопись.
  */
 export default function ChronicleClient() {
-  const { version } = useSync();
+  const { version } = useLocalData();
   const [events, setEvents] = useState<ChronicleEvent[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void (async () => {
-      const cached = await readChronicleEvents();
+      const built = await readChronicleEvents();
       if (!active) return;
-      if (cached) {
-        setEvents(cached);
-        setError(null);
-        return;
-      }
-      // Кеш пуст (первый запуск, снапшот ещё не приходил) — серверный источник.
-      const res = await fetchChronicleEvents();
-      if (!active) return;
-      if (res.ok) {
-        setEvents(res.data);
-        setError(null);
-      } else {
-        setError(res.error);
-      }
+      if (built !== null) setEvents(built);
     })();
     return () => {
       active = false;
     };
   }, [version]);
 
-  if (error) return <p className="text-sm text-[#c96a5a]">{error}</p>;
   if (events === null) return <OrbitalLoader label="Разворачиваю летопись…" className="py-16" />;
 
   return (

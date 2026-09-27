@@ -3,7 +3,7 @@ import ThoughtsClient from "@/components/thoughts-client";
 
 /**
  * Статическая оболочка экрана: данные читает ThoughtsClient из локальной
- * базы (IndexedDB), доступ проверяет middleware (Local First).
+ * базы (IndexedDB) — сервер в рендере не участвует.
  */
 export default function ThoughtsPage() {
   return (

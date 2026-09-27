@@ -6,19 +6,17 @@ import {
   type CharacteristicProgress,
 } from "@/lib/character";
 import { levelProgress } from "@/lib/xp";
-import { localDb } from "@/lib/local/db";
-import { cachedUserId } from "@/lib/local/outbox";
+import { localDb, LOCAL_USER_ID } from "@/lib/local/db";
 
 /**
- * Персонаж (Local First): уровень, XP и характеристики вычисляются из
- * локальных XP-событий — на сервер ничего не читается и не пишется.
+ * Персонаж (полностью локальное приложение): уровень, XP и характеристики
+ * вычисляются из локальных XP-событий.
  *
  * Кэш вычисления: xpEvents читаются целиком только когда изменился агрегат
  * xpProfile (тот же отпечаток, которым живёт XP-блок) — при обычном чтении
  * и переключении вкладок возвращается готовый результат, полной выборки не
  * происходит. Отпечаток надёжен: агрегат обновляется в той же транзакции,
- * что и события, и пересчитывается из событий после снапшота; смена
- * пользователя меняет userId в отпечатке.
+ * что и события.
  */
 
 export interface CharacterView {
@@ -51,15 +49,13 @@ function buildView(
 }
 
 /**
- * Персонаж из локальной базы. null — локальное хранилище или пользователь
- * ещё не готовы (кеш не гидратирован).
+ * Персонаж из локальной базы. null — локальное хранилище недоступно.
  */
 export async function readCharacterView(): Promise<CharacterView | null> {
   const db = localDb();
   if (!db) return null;
   try {
-    const userId = await cachedUserId();
-    if (!userId) return null;
+    const userId = LOCAL_USER_ID;
     const profile = await db.xpProfile.get(userId);
     const fingerprint = profile
       ? `${userId}:${profile.totalXP}:${profile.updatedAt}`

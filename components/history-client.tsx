@@ -3,54 +3,37 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { fetchHistoryPage } from "@/actions/history";
-import { useSync } from "@/lib/local/sync-context";
+import { useLocalData } from "@/lib/local/local-context";
 import { readHistoryPage } from "@/lib/local/queries";
 import type { LocalHistoryPage } from "@/lib/local/types";
 import { formatDateRu, formatWeekdayRu } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
 
 /**
- * Список истории: дни с активностью, новые сверху. Мгновенно собирается из
- * локального кеша (readHistoryPage повторяет серверную группировку по
- * entry_date в памяти); если кеш ещё не гидратирован (первый запуск) —
- * данные запрашиваются у серверного экшена, снапшот далее обновит список.
- * Пагинация — через ?page=N, страница клампится в разумные пределы.
+ * Список истории: дни с активностью, новые сверху. Полностью собирается из
+ * локальной базы (readHistoryPage повторяет прежнюю серверную группировку
+ * по entry_date в памяти). Пагинация — через ?page=N, страница клампится
+ * в разумные пределы.
  */
 export default function HistoryClient() {
   const searchParams = useSearchParams();
   const requested = Number.parseInt(searchParams.get("page") ?? "1", 10);
   const page = Number.isFinite(requested) && requested > 0 ? requested : 1;
-  const { version } = useSync();
+  const { version } = useLocalData();
   const [data, setData] = useState<LocalHistoryPage | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void (async () => {
-      const cached = await readHistoryPage(page);
+      const built = await readHistoryPage(page);
       if (!active) return;
-      if (cached) {
-        setData(cached);
-        setError(null);
-        return;
-      }
-      // Кеш пуст (первый запуск, снапшот ещё не приходил) — серверный источник.
-      const res = await fetchHistoryPage(page);
-      if (!active) return;
-      if (res.ok) {
-        setData(res.data);
-        setError(null);
-      } else {
-        setError(res.error);
-      }
+      if (built !== null) setData(built);
     })();
     return () => {
       active = false;
     };
   }, [page, version]);
 
-  if (error) return <p className="text-sm text-[#c96a5a]">{error}</p>;
   if (data === null) return <OrbitalLoader label="Читаю хронику…" className="py-10" />;
 
   const { days, page: currentPage, pageCount } = data;
@@ -70,7 +53,7 @@ export default function HistoryClient() {
             {days.map((d) => (
               <li key={d.entryDate}>
                 <Link
-                  href={`/history/${d.entryDate}`}
+                  href={`/history/day?date=${d.entryDate}`}
                   className="flex items-center justify-between gap-3 px-4 py-3.5"
                 >
                   <div>

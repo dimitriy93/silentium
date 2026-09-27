@@ -3,7 +3,7 @@ import BottomNav from "@/components/bottom-nav";
 
 /**
  * Статическая оболочка экрана: данные читает AsceticismClient из локальной
- * базы (IndexedDB), доступ проверяет middleware (Local First).
+ * базы (IndexedDB) — сервер в рендере не участвует.
  */
 export default function AsceticismPage() {
   return (

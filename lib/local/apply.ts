@@ -2,22 +2,39 @@
 
 import { todayLocalDate } from "@/lib/format";
 import type { LocalDb } from "@/lib/local/db";
-import type { OutboxEntry } from "@/lib/local/outbox-types";
 
 /**
- * Применение payload outbox-операции к журнальным таблицам кеша.
+ * Применение пользовательской операции к журнальным таблицам локальной базы.
+ * Вызывается из мутаций (lib/local/mutations.ts): запись появляется в
+ * IndexedDB в момент действия — мгновенно и без сети.
  *
- * Используется в двух местах:
- * 1) при мутации — в одной транзакции с постановкой операции в очередь
- *    (оптимистичная запись);
- * 2) после снапшота — оверлей pending-операций поверх серверных строк,
- *    чтобы pull не затирал ещё не отправленные локальные изменения.
- *
- * Строки строятся из payload (полное состояние) + userId; серверные
- * timestamp'ы неизвестны — клиентские метки играют их роль до снапшота.
+ * Строки строятся из payload (полное состояние) + userId; клиентские метки
+ * времени играют роль created/updated.
  */
 
-function fields(entry: Pick<OutboxEntry, "payload">): Record<string, unknown> {
+/** Тип сущности локальной операции. */
+export type LocalEntity =
+  | "thought"
+  | "training"
+  | "nutrition"
+  | "learning"
+  | "creation"
+  | "leisure"
+  | "asceticism"
+  | "asceticismLog";
+
+/** Тип операции над сущностью. */
+export type LocalOpType = "create" | "update" | "delete" | "upsert";
+
+/** Операция мутации: сущность, действие, id строки и полный payload. */
+export interface LocalOp {
+  entity: LocalEntity;
+  op: LocalOpType;
+  rowId: string;
+  payload: Record<string, unknown> | null;
+}
+
+function fields(entry: Pick<LocalOp, "payload">): Record<string, unknown> {
   return entry.payload ?? {};
 }
 
@@ -29,10 +46,10 @@ function numOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-/** Применить одну операцию к кешу (внутри транзакции вызывающего или сама). */
+/** Применить одну операцию к кешу (внутри транзакции вызывающего). */
 export async function applyOpToCache(
   db: LocalDb,
-  entry: Pick<OutboxEntry, "entity" | "op" | "rowId" | "payload">,
+  entry: Pick<LocalOp, "entity" | "op" | "rowId" | "payload">,
   userId: string,
 ): Promise<void> {
   const v = fields(entry);
@@ -45,7 +62,7 @@ export async function applyOpToCache(
           entryDate: str(v.entryDate),
           content: str(v.content),
           createdAt: str(v.createdAt),
-          updatedAt: str(v.createdAt),
+          updatedAt: str(v.updatedAt, str(v.createdAt)),
         } as Parameters<typeof db.thoughts.put>[0]);
         return;
       }
@@ -88,7 +105,7 @@ export async function applyOpToCache(
     }
 
     case "nutrition": {
-      // Одна строка на день: локальная версия замещает любую серверную.
+      // Одна строка на день: новая версия замещает предыдущую.
       const entryDate = str(v.entryDate);
       await db.nutrition.where("entryDate").equals(entryDate).delete();
       if (entry.op === "upsert") {
@@ -180,8 +197,7 @@ export async function applyOpToCache(
         if ("description" in v) next.description = v.description == null ? null : str(v.description);
         if ("isActive" in v) next.isActive = Boolean(v.isActive);
         await db.asceticisms.put(next);
-        // Повторный запуск (деактивация → активация): серия начинается заново,
-        // как restartAsceticismStreak на сервере.
+        // Повторный запуск (деактивация → активация): серия начинается заново.
         if (v.isActive === true) {
           const streak = await db.asceticismStreaks.where("asceticismId").equals(entry.rowId).first();
           if (streak) {
@@ -197,7 +213,7 @@ export async function applyOpToCache(
         return;
       }
       if (entry.op === "delete") {
-        // Каскад, как на сервере: отметки и серия удаляются вместе с аскезой.
+        // Каскад: отметки и серия удаляются вместе с аскезой.
         await db.asceticisms.delete(entry.rowId);
         await db.asceticismLogs.where("asceticismId").equals(entry.rowId).delete();
         await db.asceticismStreaks.where("asceticismId").equals(entry.rowId).delete();
@@ -227,30 +243,5 @@ export async function applyOpToCache(
       }
       return;
     }
-
-    case "xpEvent": {
-      // Создание XP-события: строка пишется as-is (payload — полное событие).
-      // Операции с таким rowId сервер подтверждает по PK, повтор безопасен.
-      // Агрегат xpProfile здесь НЕ трогается: при мутации его увеличивает
-      // awardXpInTx, после снапшота агрегат пересчитывается из событий.
-      if (entry.op === "create") {
-        await db.xpEvents.put({ ...v, id: entry.rowId, userId } as Parameters<
-          typeof db.xpEvents.put
-        >[0]);
-      }
-      return;
-    }
-  }
-}
-
-/**
- * Оверлей pending-операций поверх свежего снапшота: переписать строки кеша
- * из payload всех операций очереди в порядке seq (upsert по rowId, delete —
- * удалить строку). Идемпотентен и дёшев (pending-операций единицы).
- */
-export async function applyOutboxOverlay(db: LocalDb): Promise<void> {
-  const ops = (await db.outbox.toArray()).sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
-  for (const op of ops) {
-    await applyOpToCache(db, op, op.userId);
   }
 }

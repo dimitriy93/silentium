@@ -8,32 +8,18 @@ import type {
   NutritionEntry,
   Thought,
   TrainingActivity,
-} from "@/lib/db/schema";
-import type { DayStreakView } from "@/lib/day-streak";
+} from "@/lib/local/row-types";
 
 /**
- * Форматы данных локального кеша (этап 1 — кеш чтения, см.
- * docs/offline-first-research.md, раздел 4).
- *
- * IndexedDB хранит значения через структурный клон: Date клонируется, но
- * для единообразия с JSON-сериализацией server actions все метки времени
- * храним ISO-строками. Компоненты работают с ними через new Date(...) —
- * как и с Date, приходящим напрямую из server action.
+ * Форматы данных локальной базы (IndexedDB через Dexie) — единственного
+ * источника истины. Компоненты работают с ними напрямую; метки времени —
+ * ISO-строки (структурный клон IndexedDB и JSON-сериализация backup
+ * согласованы на строках), в UI — через new Date(...).
  */
 
 /** Timestamp-поля заменены на ISO-строки — формат строк в Dexie. */
 export type Localify<T> = {
   [K in keyof T]: T[K] extends Date ? string : T[K] extends Date | null ? string | null : T[K];
-};
-
-/** То же, но timestamp-поля допускают обе формы — формат строк на входе
- * кеш-писателей (сервер возвращает Date, кеш — строки). */
-export type Wire<T> = {
-  [K in keyof T]: T[K] extends Date
-    ? string | Date
-    : T[K] extends Date | null
-      ? string | Date | null
-      : T[K];
 };
 
 export type LocalThought = Localify<Thought>;
@@ -53,14 +39,14 @@ export interface LocalPathDay {
   creation: LocalCreation[];
 }
 
-/** Дневной срез аскез: тот же контракт, что AsceticismDay в actions/asceticism. */
+/** Дневной срез аскез: список, отметки дня и серии. */
 export interface LocalAsceticismDay {
   list: LocalAsceticism[];
   logs: LocalAsceticismLog[];
   streaks: LocalAsceticismStreak[];
 }
 
-/** Достижения аскез: тот же контракт, что AsceticismAchievementView. */
+/** Достижения аскез: bestMilestone каждой аскезы. */
 export interface LocalAchievement {
   asceticismId: string;
   title: string;
@@ -80,7 +66,7 @@ export interface LocalHistoryDay {
   asceticismTitles: Record<string, string>;
 }
 
-/** Сводка дня для списка истории (аналог DaySummary из lib/day). */
+/** Сводка дня для списка истории. */
 export interface LocalDaySummary {
   entryDate: string;
   totalEntries: number;
@@ -102,14 +88,15 @@ export interface LocalHistoryPage {
 export type XpEventType = "path" | "asceticism" | "thought" | "day";
 
 /**
- * Событие начисления опыта. id — клиентский UUID (стабилен для синхронизации),
- * sourceId — якорь исходного действия для защиты от повторного начисления
- * (id записи; для дневных/аскетичных бонусов — составной ключ «тип:дата»).
+ * Событие начисления опыта. id — клиентский UUID (стабилен, переносится
+ * backup'ом), sourceId — якорь исходного действия для защиты от повторного
+ * начисления (id записи; для дневных/аскетичных бонусов — составной ключ
+ * «тип:дата»).
  */
 export interface LocalXpEvent {
   id: string;
   userId: string;
-  /** Локальная дата действия (для дневных бонусов и серверной группировки). */
+  /** Локальная дата действия (для дневных бонусов и группировки). */
   entryDate: string | null;
   type: XpEventType;
   amount: number;
@@ -125,27 +112,7 @@ export interface LocalXpProfile {
   updatedAt: string;
 }
 
-/**
- * Полный снапшот журнальных таблиц пользователя (этап 1 — read-only:
- * записи по-прежнему идут через Server Actions, кеш только читает).
- */
-export interface Snapshot {
-  userId: string;
-  pulledAt: string;
-  thoughts: LocalThought[];
-  training: LocalTraining[];
-  nutrition: LocalNutrition[];
-  learning: LocalLearning[];
-  creation: LocalCreation[];
-  leisure: LocalLeisure[];
-  asceticisms: LocalAsceticism[];
-  asceticismLogs: LocalAsceticismLog[];
-  asceticismStreaks: LocalAsceticismStreak[];
-  xpEvents: LocalXpEvent[];
-  dayStreak: DayStreakView | null;
-}
-
-/** Сериализация серверной строки для кеша: Date → ISO-строка. */
+/** Сериализация timestamp в ISO-строку (для кода, принимающего Date | string). */
 export function toIso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
 }

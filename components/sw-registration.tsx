@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * Регистрация service worker'а PWA. Только в production — в dev
@@ -11,9 +12,11 @@ export default function SwRegistration() {
     if (process.env.NODE_ENV !== "production") return;
     if (!("serviceWorker" in navigator)) return;
     const register = () => {
-      navigator.serviceWorker.register("/sw.js").catch((err) => {
-        console.error("SW registration failed:", err);
-      });
+      navigator.serviceWorker
+        .register(withBasePath("/sw.js"))
+        .catch((err) => {
+          console.error("SW registration failed:", err);
+        });
     };
     if (document.readyState === "complete") register();
     else {

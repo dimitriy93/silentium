@@ -3,7 +3,7 @@ import LeisureClient from "@/components/leisure-client";
 
 /**
  * Статическая оболочка экрана: данные читает LeisureClient из локальной
- * базы (IndexedDB), доступ проверяет middleware (Local First).
+ * базы (IndexedDB) — сервер в рендере не участвует.
  */
 export default function LeisurePage() {
   return (

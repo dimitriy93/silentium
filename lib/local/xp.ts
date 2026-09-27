@@ -1,14 +1,13 @@
 "use client";
 
 import { levelFromTotal, levelProgress } from "@/lib/xp";
-import { localDb } from "@/lib/local/db";
+import { localDb, LOCAL_USER_ID } from "@/lib/local/db";
 import type { LocalDb } from "@/lib/local/db";
-import { cachedUserId } from "@/lib/local/outbox";
 import type { LocalXpEvent, XpEventType } from "@/lib/local/types";
 
 /**
- * Начисление опыта (Local First). XP-событие создаётся в той же транзакции
- * IndexedDB, что и само действие (кеш + outbox) — вызывать только из
+ * Начисление опыта (полностью локальное приложение). XP-событие создаётся в
+ * той же транзакции IndexedDB, что и само действие — вызывать только из
  * mutations.commit, никогда из рендера UI.
  *
  * Защита от повторной выдачи: перед созданием события проверяется sourceId —
@@ -18,8 +17,8 @@ import type { LocalXpEvent, XpEventType } from "@/lib/local/types";
  * питания и повторные отметки одной аскезы за день не начисляют XP второй раз.
  *
  * Агрегат xpProfile — кэш суммы событий: увеличивается в транзакции,
- * пересчитывается из событий после снапшота (writeSnapshot) — расхождение
- * невозможно, истина всегда восстанавливается из xpEvents.
+ * пересчитывается из событий при импорте backup — расхождение невозможно,
+ * истина всегда восстанавливается из xpEvents.
  */
 
 // ---------- Размеры опыта ----------
@@ -110,9 +109,8 @@ export async function readTotalXpInTx(db: LocalDb, userId: string): Promise<numb
 }
 
 /**
- * Пересчитать агрегат из событий — источник истины. Вызывается после
- * снапшота (события с сервера + оверлей pending-операций) и при чтении,
- * если кэш-строка отсутствует или принадлежит другому пользователю.
+ * Пересчитать агрегат из событий — источник истины. Вызывается при импорте
+ * backup и при чтении, если кэш-строка отсутствует.
  */
 export async function recomputeXpProfile(
   db: LocalDb,
@@ -136,16 +134,16 @@ export interface XpProfileView {
 }
 
 /**
- * Профиль опыта из локальной базы (сервер не нужен). null — кеш ещё не
- * гидратирован. Агрегат читается из xpProfile, но при отсутствии/чужой строке
- * пересчитывается из событий — расхождение кэша не показывает неверный XP.
+ * Профиль опыта из локальной базы (сервер не нужен). null — локальное
+ * хранилище недоступно. Агрегат читается из xpProfile, но при отсутствии
+ * строки пересчитывается из событий — расхождение кэша не показывает
+ * неверный XP.
  */
 export async function readXpProfileView(): Promise<XpProfileView | null> {
   const db = localDb();
   if (!db) return null;
   try {
-    const userId = await cachedUserId();
-    if (!userId) return null;
+    const userId = LOCAL_USER_ID;
     let profile = await db.xpProfile.get(userId);
     if (!profile || profile.totalXP < 0) {
       const total = await recomputeXpProfile(db, userId);
@@ -170,8 +168,7 @@ export async function readRecentXpEvents(limit = 5): Promise<LocalXpEvent[] | nu
   const db = localDb();
   if (!db) return null;
   try {
-    const userId = await cachedUserId();
-    if (!userId) return null;
+    const userId = LOCAL_USER_ID;
     const rows = await db.xpEvents.where("userId").equals(userId).toArray();
     return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
   } catch {

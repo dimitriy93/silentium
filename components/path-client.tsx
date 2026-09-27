@@ -2,23 +2,21 @@
 
 import { useCallback, useEffect, useState } from "react";
 import OrbitalLoader from "@/components/orbital-loader";
-import PendingDot from "@/components/pending-dot";
 import { useCacheQuery } from "@/hooks/use-cache-query";
-import { usePendingRows } from "@/hooks/use-pending-rows";
 import { readPathDay } from "@/lib/local/queries";
 import { writes } from "@/lib/local/mutations";
 import { useLocalImage } from "@/lib/local/images";
 import type { LocalPathDay } from "@/lib/local/types";
 import { todayLocalDate } from "@/lib/format";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * Раздел «Путь»: четыре стихии на вкладках.
  * ОГОНЬ — журнал активности; ВОДА — КБЖУ + заметка (одна запись на день);
  * ВОЗДУХ — «я изучил»; ЗЕМЛЯ — «я создал».
  *
- * Данные дня мгновенно читаются из локальной базы (Local First); мутации
- * пишутся туда же и в очередь outbox — на сервер уходят только при ручной
- * синхронизации в Профиле (бронзовая точка у несинхронизированной записи).
+ * Данные дня мгновенно читаются из локальной базы; мутации пишутся туда же
+ * в момент действия — без сети и без очередей.
  *
  * Иллюстрации Пути живут в локальном хранилище изображений (IndexedDB):
  * один раз забираются по сети и дальше отображаются без интернета.
@@ -36,11 +34,11 @@ type TabKey = (typeof TABS)[number]["key"];
 // Иллюстрация состояния пути: нейтральная + по одной на стихию.
 // Все слои рендерятся одновременно — изображения предзагружены, кроссфейд чистый.
 const PATH_IMAGES = [
-  { key: "neutral", src: "/path/path-neutral.webp", alt: "Нейтральное состояние пути" },
-  { key: "ogon", src: "/path/path-fire.webp", alt: "Путь Огня" },
-  { key: "voda", src: "/path/path-water.webp", alt: "Путь Воды" },
-  { key: "vozduh", src: "/path/path-air.webp", alt: "Путь Воздуха" },
-  { key: "zemlya", src: "/path/path-earth.webp", alt: "Путь Земли" },
+  { key: "neutral", src: withBasePath("/path/path-neutral.webp"), alt: "Нейтральное состояние пути" },
+  { key: "ogon", src: withBasePath("/path/path-fire.webp"), alt: "Путь Огня" },
+  { key: "voda", src: withBasePath("/path/path-water.webp"), alt: "Путь Воды" },
+  { key: "vozduh", src: withBasePath("/path/path-air.webp"), alt: "Путь Воздуха" },
+  { key: "zemlya", src: withBasePath("/path/path-earth.webp"), alt: "Путь Земли" },
 ] as const;
 
 export default function PathClient() {
@@ -143,13 +141,11 @@ function PathImage({ src, alt, visible }: { src: string; alt: string; visible: b
   );
 }
 
-/** Строка записи с меткой несинхронизированности. */
+/** Строка записи дня. */
 function EntryRow({
-  pending,
   children,
   onDelete,
 }: {
-  pending: boolean;
   children: React.ReactNode;
   onDelete: () => void;
 }) {
@@ -157,12 +153,6 @@ function EntryRow({
     <li className="flex items-start justify-between gap-3 px-4 py-3">
       <div className="min-w-0">
         {children}
-        {pending ? (
-          <span className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--ink-faint)]">
-            <PendingDot />
-            ещё не отправлено
-          </span>
-        ) : null}
       </div>
       <button
         type="button"
@@ -183,7 +173,6 @@ function FireTab({ day }: TabProps) {
   const [minutes, setMinutes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pendingIds = usePendingRows("training");
 
   async function submit() {
     if (!title.trim() || saving) return;
@@ -256,7 +245,6 @@ function FireTab({ day }: TabProps) {
           {day.training.map((t) => (
             <EntryRow
               key={t.id}
-              pending={pendingIds.has(t.id)}
               onDelete={() => {
                 if (confirm("Удалить запись?")) void writes.deleteTraining(t.id);
               }}
@@ -400,7 +388,6 @@ function AirTab({ day }: TabProps) {
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pendingIds = usePendingRows("learning");
 
   async function submit() {
     if (!content.trim() || saving) return;
@@ -456,7 +443,6 @@ function AirTab({ day }: TabProps) {
           {day.learning.map((t) => (
             <EntryRow
               key={t.id}
-              pending={pendingIds.has(t.id)}
               onDelete={() => {
                 if (confirm("Удалить запись?")) void writes.deleteLearning(t.id);
               }}
@@ -476,7 +462,6 @@ function EarthTab({ day }: TabProps) {
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pendingIds = usePendingRows("creation");
 
   async function submit() {
     if (!content.trim() || saving) return;
@@ -532,7 +517,6 @@ function EarthTab({ day }: TabProps) {
           {day.creation.map((t) => (
             <EntryRow
               key={t.id}
-              pending={pendingIds.has(t.id)}
               onDelete={() => {
                 if (confirm("Удалить запись?")) void writes.deleteCreation(t.id);
               }}

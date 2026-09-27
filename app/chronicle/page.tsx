@@ -3,9 +3,7 @@ import ChronicleClient from "@/components/chronicle-client";
 
 /**
  * Статическая оболочка Хроники Пути: события летописи строит клиентский
- * ChronicleClient из локальной базы (IndexedDB), доступ проверяет
- * middleware. При пустом кеше (первый запуск) — серверный экшен
- * fetchChronicleEvents (Local First).
+ * ChronicleClient из локальной базы (IndexedDB), при пустой базе показывается пустая летопись.
  */
 export default function ChroniclePage() {
   return (

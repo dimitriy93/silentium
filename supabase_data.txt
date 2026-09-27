@@ -1,9 +1,0 @@
-NEXT_PUBLIC_SUPABASE_URL=https://ytbwpuqvvbyunfcbztnr.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_647seVpLd-oPaorIEwf3MA_iUQRA7Jr
-
-SUPABASE_URL=https://ytbwpuqvvbyunfcbztnr.supabase.co
-SUPABASE_PUBLISHABLE_KEY=sb_publishable_647seVpLd-oPaorIEwf3MA_iUQRA7Jr
-SUPABASE_SECRET_KEY=sb_secret_E-cOxHVPGcZWu6vcuZG1eg_NT9Yvrde
-SUPABASE_JWKS_URL=https://ytbwpuqvvbyunfcbztnr.supabase.co/auth/v1/.well-known/jwks.json
-
-GEMINI_KEY=AQ.Ab8RN6J63KtmkmOpvJE5GLlINx7BSSzNU1_crF7mMRcfm3RLbA

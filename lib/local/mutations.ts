@@ -1,9 +1,9 @@
 "use client";
 
-import { journalTables, localDb } from "@/lib/local/db";
-import { applyOpToCache } from "@/lib/local/apply";
-import { addOutboxOp, cachedUserId, notifyOutboxChanged } from "@/lib/local/outbox";
-import type { OutboxEntity, OutboxOpType } from "@/lib/local/outbox-types";
+import { journalTables, localDb, LOCAL_USER_ID, type LocalDb } from "@/lib/local/db";
+import { applyOpToCache, type LocalEntity, type LocalOpType } from "@/lib/local/apply";
+import { notifyLocalChanged } from "@/lib/local/events";
+import { syncLocalAsceticismStreak, syncLocalDayStreak } from "@/lib/local/streaks";
 import {
   XP_AMOUNTS,
   awardXpInTx,
@@ -14,33 +14,29 @@ import {
   type XpToastDetail,
 } from "@/lib/local/xp";
 import { XP_DESCRIPTIONS } from "@/lib/xp";
-import type { LocalDb } from "@/lib/local/db";
-import type { LocalXpEvent } from "@/lib/local/types";
+import { todayLocalDate } from "@/lib/format";
 
 /**
- * Единый путь пользовательских мутаций (Local First): локальное изменение
- * кеша и постановка в outbox — одна транзакция IndexedDB, затем уведомление
- * SyncProvider (экраны перечитывают локальную базу). На сервер ничего не
- * уходит автоматически — отправка только вручную из Профиля.
+ * Единый путь пользовательских мутаций (полностью локальное приложение):
+ * локальное изменение журнальных таблиц, XP-событие и пересчёт серий — одна
+ * транзакция IndexedDB, затем уведомление LocalProvider (экраны перечитывают
+ * локальную базу). Сервер не участвует: данные живут и умирают на устройстве.
  *
- * UUID новой строки генерируется здесь, до постановки в очередь; клиентский
- * createdAt сохраняет существующую сортировку (внутри дня — по времени
- * создания). Операция требует хотя бы одной гидратации базы: без неё
- * неизвестен userId (после входа база один раз наполняется снапшотом).
+ * UUID новой строки генерируется здесь; клиентский createdAt сохраняет
+ * существующую сортировку (внутри дня — по времени создания).
  *
- * XP начисляется здесь же — в момент успешного локального действия, в той же
- * транзакции (см. lib/local/xp.ts): событие + агрегат + операция outbox
- * атомарны вместе с самой записью. Дневной бонус +10 — когда запись первая
- * за день (зеркало «осмысленного» дня из dayRowsUnionSql: мысли, путь,
- * развлечения, любые отметки аскез) и за эту дату бонус ещё не выдавался.
+ * XP начисляется в момент успешного локального действия, в той же транзакции
+ * (см. lib/local/xp.ts): событие + агрегат атомарны с самой записью. Дневной
+ * бонус +10 — когда запись первая за день (те же разделы, что у серии
+ * дневника) и за эту дату бонус ещё не выдавался.
  */
 
 export type MutationResult = { ok: true } | { ok: false; error: string };
 
 // ---------- XP: планы начисления ----------
 
-/** Действия, добавляющие контент дня (для дневного бонуса). */
-const DAY_CONTENT_ENTITIES = new Set<OutboxEntity>([
+/** Действия, добавляющие контент дня (для дневного бонуса и серии дневника). */
+const DAY_CONTENT_ENTITIES = new Set<LocalEntity>([
   "thought",
   "training",
   "nutrition",
@@ -57,8 +53,8 @@ const DAY_CONTENT_ENTITIES = new Set<OutboxEntity>([
  * одна на аскезу и день).
  */
 function xpPlanFor(
-  entity: OutboxEntity,
-  op: OutboxOpType,
+  entity: LocalEntity,
+  op: LocalOpType,
   payload: Record<string, unknown> | null,
 ): XpAwardPlan | null {
   const v = payload ?? {};
@@ -120,8 +116,8 @@ function xpPlanFor(
 
 /** Дневной бонус: действие добавляет первый контент дня (проверка — до записи). */
 function dayPlanFor(
-  entity: OutboxEntity,
-  op: OutboxOpType,
+  entity: LocalEntity,
+  op: LocalOpType,
   payload: Record<string, unknown> | null,
 ): { entryDate: string } | null {
   if (op !== "create" && op !== "upsert") return null;
@@ -133,7 +129,7 @@ function dayPlanFor(
   return { entryDate };
 }
 
-/** Есть ли уже записи за дату (те же разделы, что dayRowsUnionSql на сервере). */
+/** Есть ли уже записи за дату (те же разделы, что у серии дневника). */
 async function dayHasEntries(db: LocalDb, entryDate: string): Promise<boolean> {
   const counts = await Promise.all([
     db.thoughts.where("entryDate").equals(entryDate).count(),
@@ -148,58 +144,52 @@ async function dayHasEntries(db: LocalDb, entryDate: string): Promise<boolean> {
 }
 
 async function commit(
-  entity: OutboxEntity,
-  op: OutboxOpType,
+  entity: LocalEntity,
+  op: LocalOpType,
   rowId: string,
   payload: Record<string, unknown> | null,
 ): Promise<MutationResult> {
   const db = localDb();
   if (!db) return { ok: false, error: "Локальное хранилище недоступно" };
-  const userId = await cachedUserId();
-  if (!userId) {
-    return { ok: false, error: "Локальные данные не готовы — синхронизируйте в Профиле" };
-  }
+  const userId = LOCAL_USER_ID;
   const plan = xpPlanFor(entity, op, payload);
   const dayPlan = dayPlanFor(entity, op, payload);
   let toast: XpToastDetail | null = null;
   try {
     await db.transaction(
       "rw",
-      [...journalTables(db), db.xpProfile, db.outbox],
+      [...journalTables(db), db.xpProfile],
       async () => {
         const dayWasEmpty = dayPlan ? !(await dayHasEntries(db, dayPlan.entryDate)) : false;
         await applyOpToCache(db, { entity, op, rowId, payload }, userId);
-        await addOutboxOp({
-          opId: crypto.randomUUID(),
-          userId,
-          entity,
-          op,
-          rowId,
-          payload,
-          createdAt: new Date().toISOString(),
-        });
+
+        // Пересчёт серий — в той же транзакции (раньше это делал сервер,
+        // результат приходил со снапшотом).
+        if (DAY_CONTENT_ENTITIES.has(entity)) {
+          const v = payload ?? {};
+          const entryDate = typeof v.entryDate === "string" ? v.entryDate : null;
+          // Создания считаются от даты записи, удаления — от сегодня
+          // (зеркало прежнего серверного syncDayStreak).
+          await syncLocalDayStreak(db, op === "delete" || !entryDate ? todayLocalDate() : entryDate);
+        }
+        if (entity === "asceticismLog" && op === "upsert") {
+          const logPayload = payload ?? {};
+          const asceticismId = typeof logPayload.asceticismId === "string" ? logPayload.asceticismId : null;
+          const logDate = typeof logPayload.entryDate === "string" ? logPayload.entryDate : null;
+          if (asceticismId && logDate) {
+            await syncLocalAsceticismStreak(db, asceticismId, logDate);
+          }
+        }
 
         if (!plan && !dayPlan) return;
         const events: XpToastDetail["events"] = [];
         const beforeTotal = await readTotalXpInTx(db, userId);
         let awardedSum = 0;
-        const enqueueXpEvent = async (event: LocalXpEvent): Promise<void> => {
-          await addOutboxOp({
-            opId: crypto.randomUUID(),
-            userId,
-            entity: "xpEvent",
-            op: "create",
-            rowId: event.id,
-            payload: { ...event },
-            createdAt: event.createdAt,
-          });
-        };
         if (plan) {
           const event = await awardXpInTx(db, userId, plan);
           if (event) {
             awardedSum += event.amount;
             events.push({ amount: event.amount, description: event.description });
-            await enqueueXpEvent(event);
           }
         }
         if (dayPlan && dayWasEmpty) {
@@ -214,7 +204,6 @@ async function commit(
           if (event) {
             awardedSum += event.amount;
             events.push({ amount: event.amount, description: event.description });
-            await enqueueXpEvent(event);
           }
         }
         if (awardedSum > 0) {
@@ -230,7 +219,7 @@ async function commit(
     return { ok: false, error: "Не удалось сохранить запись на устройстве" };
   }
   if (toast) notifyXpAwarded(toast);
-  notifyOutboxChanged();
+  notifyLocalChanged();
   return { ok: true };
 }
 

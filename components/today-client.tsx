@@ -22,20 +22,18 @@ import type {
 import { formatDateRu, formatMinutes, formatWeekdayRu, todayLocalDate } from "@/lib/format";
 import { displayStreak, pluralDays } from "@/lib/asceticism-streak";
 import OrbitalLoader from "@/components/orbital-loader";
-import PendingDot from "@/components/pending-dot";
-import { usePendingRows } from "@/hooks/use-pending-rows";
 import AvatarRoom from "@/components/avatar-room/avatar-room";
 import CharacterCard from "@/components/character-card";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * Главный экран «Сегодня»: дата, быстрый ввод мысли, сводка Пути,
- * развлечения, отметки аскез и наставник. Дата вычисляется на клиенте —
+ * развлечения и отметки аскез. Дата вычисляется на клиенте —
  * «сегодня» всегда локальное для пользователя.
  *
- * Данные читаются из локального кеша (IndexedDB) — экран открывается
- * мгновенно. Мутации идут через локальный путь (кеш + outbox, этап 2):
- * запись появляется мгновенно, на сервер вручную, офлайн —
- * ждёт в очереди.
+ * Данные читаются из локальной базы (IndexedDB) — экран открывается
+ * мгновенно и работает офлайн. Мутации идут через локальный путь
+ * (lib/local/mutations.ts): запись и XP появляются мгновенно, без сети.
  */
 export default function TodayClient() {
   const [today, setToday] = useState<string | null>(null);
@@ -89,7 +87,6 @@ export default function TodayClient() {
       <PathCard path={path} />
       <LeisureCard leisure={leisure} />
       <AsceticismCard asceticism={asceticism} today={today} />
-      <MentorCard />
     </div>
   );
 }
@@ -185,7 +182,6 @@ function ThoughtsCard({ thoughts }: { thoughts: LocalThought[] | null }) {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pendingIds = usePendingRows("thought");
 
   async function submit() {
     const content = draft.trim();
@@ -235,7 +231,6 @@ function ThoughtsCard({ thoughts }: { thoughts: LocalThought[] | null }) {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
-                  {pendingIds.has(t.id) ? <PendingDot /> : null}
                 </span>
                 {t.content}
               </li>
@@ -568,33 +563,12 @@ function TrophyImage({ milestone, title }: { milestone: number; title: string })
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={`/achievements/trophy-${milestone}.webp`}
+      src={withBasePath(`/achievements/trophy-${milestone}.webp`)}
       alt={`Награда «${title}» за ${pluralDays(milestone)}`}
       width={40}
       height={40}
       className="h-10 w-10 shrink-0 object-contain"
       onError={() => setFailed(true)}
     />
-  );
-}
-
-// ---------- Наставник ----------
-
-function MentorCard() {
-  return (
-    <section className="bronze-card bronze-edge p-4">
-      <h2 className="font-chronicle mb-2 text-base font-semibold text-[var(--gold)]">
-        Наставник
-      </h2>
-      <p className="mb-3 text-sm leading-relaxed text-[var(--ink-secondary)]">
-        К концу дня Наставник прочтёт записи и даст выжимку, наблюдение и наставление.
-      </p>
-      <Link
-        href="/mentor"
-        className="btn-bronze flex h-11 items-center justify-center text-sm"
-      >
-        Получить наставление
-      </Link>
-    </section>
   );
 }

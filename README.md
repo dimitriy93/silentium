@@ -1,100 +1,90 @@
 # Silentium — Безмолвная дисциплина
 
-Личный дневник дисциплины, развития и самоанализа с элементами RPG и AI-наставником.
+Личный дневник дисциплины, развития и самоанализа с элементами RPG.
 Тёмная «хроника»: бронза, состаренный металл, приглушённое золото.
+
+Полностью локальное PWA: без аккаунтов, авторизации и серверной синхронизации.
+Все данные живут в **IndexedDB (Dexie)** на устройстве пользователя; перенос и
+восстановление — через **экспорт/импорт резервной копии** (JSON-файл).
+Собирается в **статический сайт** и работает на любом static-хостинге.
 
 ## Стек
 
-- **Next.js 15** (App Router, Server Components, Server Actions)
+- **Next.js 15** (App Router, `output: "export"` — статическая сборка)
 - **React 19**, **TypeScript**
-- **Supabase** (Auth) + **PostgreSQL**
-- **Drizzle ORM** + `pg` (node-postgres), миграции `drizzle-kit`
+- **Dexie** (IndexedDB) — единственный источник истины
 - **Tailwind CSS 4**
-- **Zod** — валидация
-- Vercel-compatible
+- **Zod** — валидация backup при импорте
+- PWA: service worker, manifest, офлайн-работа
 
 ## Структура
 
 ```
-app/          страницы (today, thoughts, path, leisure, asceticism, history, mentor, settings, login, register)
-actions/      server actions (auth, thoughts, path, leisure, asceticism)
-components/   клиентские компоненты
+app/             страницы (today, thoughts, path, leisure, asceticism, history, chronicle, settings)
+components/      клиентские компоненты
+hooks/           клиентские хуки (кеш-чтение, аватар, диалоги)
 lib/
-  db/         Drizzle: схема + пул с RLS-контекстом (withUserDb)
-  supabase/   Supabase-клиенты (server, middleware)
-  mentor.ts   system prompt наставника (хранится в БД, ключ 'system')
-  profile.ts  RPG-профиль (level/xp/rank)
-  day.ts      агрегаты дня для «Сегодня» и «Истории»
-drizzle/      SQL-миграции (0000 — схема, 0001 — RLS/FK/справочники/триггер)
-scripts/      smoke-тест слоя данных, apply-migrations
+  local/         локальный слой: база Dexie, мутации, XP, серии, статистика, backup
+  streak-math.ts чистая математика серии дневника
+public/sw.js     service worker (офлайн-оболочки и RSC-payload'ы вкладок)
 ```
 
-> В приложении используется драйвер `pg` (transaction pooler Supabase :6543,
-> unnamed statements — безопасно для PgBouncer/Supavisor). postgres.js
-> применяется только в служебных скриптах (`scripts/smoke.ts`,
-> `scripts/apply-migrations.mjs`).
+## Данные и XP
 
-## Безопасность данных
+- Единственный источник истины — IndexedDB (`lib/local/db.ts`): журнальные
+  таблицы мыслей/пути/развлечений/аскетез, XP-события, изображения, серии.
+- XP начисляется **в момент локальной мутации** в той же транзакции IndexedDB
+  (`lib/local/mutations.ts`, `lib/local/xp.ts`); уровень, ранг, пять
+  характеристик и радар вычисляются из XP-событий (`lib/xp.ts`, `lib/character.ts`).
+- Серии дневника и аскез пересчитываются локально после каждой записи
+  (`lib/local/streaks.ts`).
+- Производные значения (агрегат XP, серия дневника) при импорте backup
+  пересчитываются — backup хранит только первичные данные.
 
-- Все таблицы включают **FORCE ROW LEVEL SECURITY**; политики — `auth.uid() = user_id`.
-- Приложение ходит в БД через `withUserDb(userId, fn)`: JWT-контекст задаётся в
-  каждой транзакции, `userId` всегда из серверной сессии Supabase.
-- Регистрация закрытая: whitelist email (`ALLOWED_EMAILS`) + ключ приглашения (`INVITE_KEY`).
+## Резервная копия
+
+- Экспорт: Профиль → «Резервная копия» → файл `silentium-backup-YYYY-MM-DD.json`
+  (`lib/local/backup.ts`): формат `silentium-backup`, `version: 1`, записи,
+  отметки, аскезы, серии аскез, XP-события, изображения.
+- Импорт: выбор файла → валидация (format/version/структура, Zod) →
+  подтверждение → атомарная замена данных в одной транзакции IndexedDB.
+  UUID записей сохраняются; перед заменой в хранилище пишется страховочная
+  копия текущих данных.
 
 ## Разработка
 
 ```bash
 npm install
 npm run dev          # http://localhost:3000
-
-# Локальный Supabase (Auth + Postgres в Docker):
-npx supabase start   # API :54321, Postgres :54322, Studio :54323
-
-# Миграции:
-npm run db:generate  # сгенерировать из lib/db/schema.ts
-npm run db:migrate   # применить
-
-# Проверки:
 npm run typecheck
 npm run lint
-npm run build
-npm run db:smoke     # smoke-тест слоя данных (нужна живая БД)
+npm run build        # статическая сборка в out/
 ```
 
-> Локально smoke-тест лучше гонять под не-суперпользовательской ролью,
-> иначе RLS обходится: `DATABASE_URL=postgresql://silentium_app:... SMOKE_ADMIN_URL=postgresql://postgres@...`.
-> На Supabase роль `postgres` не суперпользователь — FORCE RLS работает как есть.
+Локальный просмотр production-сборки:
 
-## Переменные окружения (.env.local)
+```bash
+npx serve out        # или любой static-сервер каталога out/
+```
 
-| Переменная | Назначение |
-| --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | URL Supabase (Auth) |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon-ключ Supabase |
-| `DATABASE_URL` | Postgres для Drizzle (прямое подключение) |
-| `INVITE_KEY` | ключ приглашения для регистрации |
-| `ALLOWED_EMAILS` | whitelist email через запятую |
+## Деплой
 
-## Схема БД (кратко)
+`npm run build` создаёт каталог `out/` (HTML + статика + PWA-ассеты),
+пригодный для GitHub Pages, Netlify, nginx, S3 и любого static-хостинга.
 
-- `profiles`, `rpg_profiles` (level/xp/rank) — создаются триггером при регистрации
-- `days` — якорь дня (для AI-памяти и будущей дневной метаинформации)
-- `thoughts` — лента мыслей
-- `path_elements` — справочник стихий (ogon/voda/vozduh/zemlya)
-- `training_activities` — Огонь: журнал физической активности
-- `nutrition_entries` — Вода: КБЖУ + заметка (1 строка/день, поле `source` под Nutriarium)
-- `learning_entries` — Воздух: «я изучил»
-- `creation_entries` — Земля: «я создал»
-- `leisure_entries` — развлечения (название + минуты)
-- `asceticisms`, `asceticism_logs` — аскезы и отметки done/failed
-- `ai_daily_memories`, `ai_periodic_memories` — память наставника (день/период)
-- `mentor_messages`, `mentor_prompts` — сообщения и system prompt наставника
-- `xp_events` — архитектурная заготовка системы XP
+- Каталожные URL (`/today/`) включены через `trailingSlash` — работают на
+  GitHub Pages без обработки путей; `.nojekyll` кладётся в `out/` автоматически.
+- Для размещения в подпапке задайте переменную окружения на сборке:
+  `NEXT_PUBLIC_BASE_PATH=/repo-name` — базовый путь применится к ассетам,
+  манифесту и service worker.
 
-## Планы (следующие этапы)
+## Переменные окружения
 
-1. Создать облачный проект Supabase и деплой на Vercel.
-2. Интеграция AI-наставника: сбор дня → `ai_daily_memories` → наставление.
-3. Система XP: начисление за записи/аскезы, уровни и ранги.
-4. Расписание тренировок (тип тренировки, упражнения, подходы/повторы/вес).
-5. Интеграция с Nutriarium.
+Серверных переменных нет. Единственная необязательная переменная сборки —
+`NEXT_PUBLIC_BASE_PATH` (префикс деплоя в подпапке).
+
+## Планы (возможные следующие шаги)
+
+1. Merge-импорт резервных копий (объединение двух устройств).
+2. Расписание тренировок (тип, упражнения, подходы/повторы/вес).
+3. Интеграция с Nutriarium (поле `source` у питания уже предусмотрено).

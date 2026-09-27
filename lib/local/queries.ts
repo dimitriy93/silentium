@@ -1,8 +1,9 @@
 "use client";
 
 import { HISTORY_PAGE_SIZE } from "@/lib/local/constants";
-import { DAY_STREAK_KEY, SNAPSHOT_META_KEY, localDb } from "@/lib/local/db";
-import { isCacheHydrated } from "@/lib/local/writes";
+import { localDb } from "@/lib/local/db";
+import { readLocalDayStreakView } from "@/lib/local/streaks";
+import { todayLocalDate } from "@/lib/format";
 import type {
   LocalAchievement,
   LocalAsceticismDay,
@@ -14,13 +15,12 @@ import type {
 } from "@/lib/local/types";
 
 /**
- * Чтение из локального кеша. Каждый читатель возвращает null, если кеш ещё
- * не гидратирован (снапшот ни разу не приходил) — компонент в этом случае
- * показывает лоадер и/или обращается к серверному экшену. Пустые массивы —
- * валидные данные («за день ничего нет»), а не отсутствие кеша.
+ * Чтение из локальной базы — единственного источника истины. Читатель
+ * возвращает null, только если локальное хранилище недоступно (SSR или
+ * приватный режим); пустые массивы — валидные данные («за день ничего нет»).
  *
- * Порядки строк повторяют серверные: внутри дня — createdAt desc;
- * аскезы — активные сверху, затем по created_at.
+ * Порядки строк прежние: внутри дня — createdAt desc; аскезы — активные
+ * сверху, затем по created_at.
  */
 
 /** ISO-строки сортируются лексикографически = хронологически. */
@@ -28,13 +28,9 @@ function byNewestFirst(a: { createdAt: string }, b: { createdAt: string }): numb
   return b.createdAt.localeCompare(a.createdAt);
 }
 
-async function hydrated(): Promise<boolean> {
-  return isCacheHydrated();
-}
-
 export async function readThoughtsForDay(entryDate: string): Promise<LocalThought[] | null> {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
     const rows = await db.thoughts.where("entryDate").equals(entryDate).toArray();
     return rows.sort(byNewestFirst);
@@ -43,10 +39,10 @@ export async function readThoughtsForDay(entryDate: string): Promise<LocalThough
   }
 }
 
-/** Вся лента мыслей, новые сверху (зеркало listThoughts: limit 200). */
+/** Вся лента мыслей, новые сверху. */
 export async function readAllThoughts(limit = 200): Promise<LocalThought[] | null> {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
     const rows = await db.thoughts.toArray();
     return rows.sort(byNewestFirst).slice(0, limit);
@@ -57,7 +53,7 @@ export async function readAllThoughts(limit = 200): Promise<LocalThought[] | nul
 
 export async function readPathDay(entryDate: string): Promise<LocalPathDay | null> {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
     return await db.transaction(
       "r",
@@ -84,7 +80,7 @@ export async function readPathDay(entryDate: string): Promise<LocalPathDay | nul
 
 export async function readLeisureForDay(entryDate: string): Promise<LocalLeisure[] | null> {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
     const rows = await db.leisure.where("entryDate").equals(entryDate).toArray();
     return rows.sort(byNewestFirst);
@@ -95,7 +91,7 @@ export async function readLeisureForDay(entryDate: string): Promise<LocalLeisure
 
 export async function readAsceticismDay(entryDate: string): Promise<LocalAsceticismDay | null> {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
     return await db.transaction(
       "r",
@@ -118,10 +114,10 @@ export async function readAsceticismDay(entryDate: string): Promise<LocalAscetic
   }
 }
 
-/** Достижения аскез: bestMilestone каждой аскезы (зеркало listAsceticismAchievements). */
+/** Достижения аскез: bestMilestone каждой аскезы. */
 export async function readAsceticismAchievements(): Promise<LocalAchievement[] | null> {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
     return await db.transaction("r", [db.asceticisms, db.asceticismStreaks], async () => {
       const [list, streaks] = await Promise.all([db.asceticisms.toArray(), db.asceticismStreaks.toArray()]);
@@ -136,31 +132,29 @@ export async function readAsceticismAchievements(): Promise<LocalAchievement[] |
   }
 }
 
-/** Серия дневника из снапшота (read-only; пересчёт остаётся на сервере). */
+/** Серия дневника: хранимая строка + проверка «живости» на локальную дату. */
 export async function readDayStreakView(): Promise<
   { currentStreak: number; longestStreak: number; bestMilestone: number; lastActiveDate: string | null } | null
 > {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
-    const row = await db.dayStreak.get(DAY_STREAK_KEY);
-    return row?.view ?? null;
+    return await readLocalDayStreakView(db, todayLocalDate());
   } catch {
     return null;
   }
 }
 
 /**
- * Страница истории, собранная из кеша (зеркало listDaySummariesPage):
- * UNION всех источников заменяется проходом по таблицам, группировка по
- * entry_date, пагинация в памяти — данные пользователя малы.
+ * Страница истории, собранная из локальной базы: группировка по entry_date,
+ * пагинация в памяти — данные пользователя малы.
  */
 export async function readHistoryPage(
   page: number,
   pageSize: number = HISTORY_PAGE_SIZE,
 ): Promise<LocalHistoryPage | null> {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
     return await db.transaction(
       "r",
@@ -228,10 +222,10 @@ export async function readHistoryPage(
   }
 }
 
-/** Один день истории из кеша (для страницы /history/[date]). */
+/** Один день истории из локальной базы (для страницы дня истории). */
 export async function readHistoryDay(entryDate: string): Promise<LocalHistoryDay | null> {
   const db = localDb();
-  if (!db || !(await hydrated())) return null;
+  if (!db) return null;
   try {
     return await db.transaction(
       "r",
@@ -263,18 +257,6 @@ export async function readHistoryDay(entryDate: string): Promise<LocalHistoryDay
         };
       },
     );
-  } catch {
-    return null;
-  }
-}
-
-/** Когда кеш был гидратирован (для индикатора актуализации). */
-export async function lastSnapshotAt(): Promise<string | null> {
-  const db = localDb();
-  if (!db) return null;
-  try {
-    const meta = await db.meta.get(SNAPSHOT_META_KEY);
-    return meta?.pulledAt ?? null;
   } catch {
     return null;
   }

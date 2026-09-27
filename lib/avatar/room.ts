@@ -3,13 +3,15 @@
  * 05:00–11:59 morning, 12:00–16:59 afternoon, 17:00–21:59 evening, 22:00–04:59 night.
  */
 
+import { withBasePath } from "@/lib/base-path";
+
 export type RoomPeriod = "morning" | "afternoon" | "evening" | "night";
 
 export const ROOM_IMAGES: Record<RoomPeriod, string> = {
-  morning: "/room/room_morning.webp",
-  afternoon: "/room/room_afternoon.webp",
-  evening: "/room/room_evening.webp",
-  night: "/room/room_night.webp",
+  morning: withBasePath("/room/room_morning.webp"),
+  afternoon: withBasePath("/room/room_afternoon.webp"),
+  evening: withBasePath("/room/room_evening.webp"),
+  night: withBasePath("/room/room_night.webp"),
 };
 
 export function roomPeriodForHour(hour: number): RoomPeriod {

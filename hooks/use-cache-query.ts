@@ -1,21 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState, type DependencyList } from "react";
-import { useSync } from "@/lib/local/sync-context";
+import { useLocalData } from "@/lib/local/local-context";
 
 /**
- * Чтение данных экрана из локального кеша (stale-while-revalidate, этап 1).
+ * Чтение данных экрана из локальной базы.
  *
  * Читатель вызывается при монтировании, при смене зависимостей (дата,
- * страница) и после каждой успешной снапшот-синхронизации (version из
- * SyncProvider) — так интерфейс, показанный мгновенно из кеша,
- * обновляется, если сервер вернул другое.
+ * страница) и после каждой локальной мутации (version из LocalProvider) —
+ * интерфейс всегда отражает текущее состояние IndexedDB.
  *
- * null от читателя («кеш ещё не гидратирован») состояние не изменяет:
- * компонент продолжает показывать лоадер до первого снапшота.
+ * null от читателя («хранилище недоступно») состояние не изменяет:
+ * компонент продолжает показывать лоадер.
  */
 export function useCacheQuery<T>(read: () => Promise<T | null>, deps: DependencyList): T | null {
-  const { version } = useSync();
+  const { version } = useLocalData();
   const [data, setData] = useState<T | null>(null);
   const readRef = useRef(read);
   readRef.current = read;
@@ -27,7 +26,7 @@ export function useCacheQuery<T>(read: () => Promise<T | null>, deps: Dependency
         const result = await readRef.current();
         if (active && result !== null) setData(result);
       } catch {
-        // Повреждённый кеш не ломает экран: остаётся лоадер / данные сервера.
+        // Повреждённый кеш не ломает экран: остаётся последнее состояние.
       }
     })();
     return () => {

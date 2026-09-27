@@ -2,21 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useCacheQuery } from "@/hooks/use-cache-query";
-import { usePendingRows } from "@/hooks/use-pending-rows";
 import { readAllThoughts } from "@/lib/local/queries";
 import { writes } from "@/lib/local/mutations";
 import type { LocalThought } from "@/lib/local/types";
 import { formatDateHeader, todayLocalDate } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
-import PendingDot from "@/components/pending-dot";
 
 /**
  * Лента мыслей: быстрый ввод сверху, группировка по датам, редактирование
  * и удаление на месте. Дата и время записи — локальные для пользователя.
- *
- * Все мутации идут через локальный путь (кеш + outbox, этап 2): запись
- * появляется мгновенно, на сервер вручную, офлайн — ждёт в
- * очереди. Несинхронизированные записи помечены бронзовой точкой.
+ * Все мутации идут через локальный путь — запись появляется мгновенно,
+ * без сети.
  */
 export default function ThoughtsClient() {
   const [draft, setDraft] = useState("");
@@ -27,7 +23,6 @@ export default function ThoughtsClient() {
   const [today, setToday] = useState<string | null>(null);
 
   const thoughts = useCacheQuery(readAllThoughts, []);
-  const pendingIds = usePendingRows("thought");
 
   useEffect(() => {
     setToday(todayLocalDate());
@@ -159,7 +154,6 @@ export default function ThoughtsClient() {
                                 minute: "2-digit",
                               })}
                             </time>
-                            {pendingIds.has(t.id) ? <PendingDot /> : null}
                           </span>
                           <div className="flex gap-3 text-xs">
                             <button

@@ -2,21 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useCacheQuery } from "@/hooks/use-cache-query";
-import { usePendingRows } from "@/hooks/use-pending-rows";
 import { readLeisureForDay } from "@/lib/local/queries";
 import { writes } from "@/lib/local/mutations";
 import type { LocalLeisure } from "@/lib/local/types";
 import { formatMinutes, todayLocalDate } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
-import PendingDot from "@/components/pending-dot";
 
 /**
  * Раздел «Развлечения» — честный учёт отдыха и отвлечений. Не система
  * наказаний: задача — видеть реальную картину дня.
  *
  * Записи дня мгновенно читаются из локального кеша; мутации идут через
- * локальный путь (кеш + outbox): запись появляется мгновенно, при сети
- * на сервер вручную, офлайн — ждёт в очереди.
+ * локальный путь: запись появляется мгновенно, без сети.
  */
 export default function LeisureClient() {
   const [title, setTitle] = useState("");
@@ -29,7 +26,6 @@ export default function LeisureClient() {
     useCallback(async () => (today ? readLeisureForDay(today) : null), [today]),
     [today],
   );
-  const pendingIds = usePendingRows("leisure");
 
   useEffect(() => {
     setToday(todayLocalDate());
@@ -113,12 +109,6 @@ export default function LeisureClient() {
                 <p className="text-[15px] font-medium">{e.title}</p>
                 {e.minutes ? (
                   <p className="text-xs text-[var(--ink-faint)]">{formatMinutes(e.minutes)}</p>
-                ) : null}
-                {pendingIds.has(e.id) ? (
-                  <span className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--ink-faint)]">
-                    <PendingDot />
-                    ещё не отправлено
-                  </span>
                 ) : null}
               </div>
               <button

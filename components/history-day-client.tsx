@@ -1,52 +1,34 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchHistoryDay } from "@/actions/history";
-import { useSync } from "@/lib/local/sync-context";
+import { useLocalData } from "@/lib/local/local-context";
 import { readHistoryDay } from "@/lib/local/queries";
-import { cacheHistoryDay } from "@/lib/local/writes";
 import type { LocalHistoryDay } from "@/lib/local/types";
 import { formatMinutes } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
 import LocalTime from "@/components/local-time";
 
 /**
- * Один день истории: записи всех разделов этого дня. Мгновенно читается из
- * локального кеша; если кеш ещё не гидратирован — данные запрашиваются у
- * серверного экшена и одновременно записываются в кеш. Только чтение —
- * редактирование выполняется в соответствующих разделах.
+ * Один день истории: записи всех разделов этого дня. Полностью читается из
+ * локальной базы. Только чтение — редактирование выполняется в
+ * соответствующих разделах.
  */
 export default function HistoryDayClient({ date }: { date: string }) {
-  const { version } = useSync();
+  const { version } = useLocalData();
   const [day, setDay] = useState<LocalHistoryDay | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void (async () => {
-      const cached = await readHistoryDay(date);
+      const built = await readHistoryDay(date);
       if (!active) return;
-      if (cached) {
-        setDay(cached);
-        setError(null);
-        return;
-      }
-      const res = await fetchHistoryDay(date);
-      if (!active) return;
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setError(null);
-      setDay(res.data);
-      await cacheHistoryDay(res.data);
+      if (built !== null) setDay(built);
     })();
     return () => {
       active = false;
     };
   }, [date, version]);
 
-  if (error) return <p className="text-sm text-[#c96a5a]">{error}</p>;
   if (day === null) return <OrbitalLoader label="Читаю хронику…" className="py-10" />;
 
   const hasAny =

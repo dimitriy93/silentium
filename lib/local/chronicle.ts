@@ -3,14 +3,12 @@
 import { ASCETICISM_MILESTONES, firstMilestoneDate, pluralDays } from "@/lib/asceticism-streak";
 import { KIND_ORDER, type ChronicleEvent } from "@/lib/chronicle-shared";
 import { localDb } from "@/lib/local/db";
-import { isCacheHydrated } from "@/lib/local/writes";
 
 /**
- * Хроника Пути из локальной базы — клиентский двойник getChronicleEvents
- * (lib/chronicle.ts): те же источники и та же арифметика, только вместо
- * UNION-запроса к Postgres — проход по журнальным таблицам Dexie.
- * Возвращает null, если кеш ещё не гидратирован (первый запуск) — компонент
- * в этом случае обращается к серверному экшену fetchChronicleEvents.
+ * Хроника Пути из локальной базы — полный источник летописи (после удаления
+ * сервера серверный двойник lib/chronicle.ts удалён): те же источники и та же
+ * арифметика, только вместо UNION-запроса к Postgres — проход по журнальным
+ * таблицам Dexie. Возвращает null, только если хранилище недоступно.
  */
 
 /**
@@ -40,7 +38,7 @@ async function activeDates(db: NonNullable<ReturnType<typeof localDb>>): Promise
 
 export async function readChronicleEvents(): Promise<ChronicleEvent[] | null> {
   const db = localDb();
-  if (!db || !(await isCacheHydrated())) return null;
+  if (!db) return null;
   try {
     return await db.transaction(
       "r",
