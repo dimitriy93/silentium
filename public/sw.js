@@ -14,7 +14,7 @@
  * Версия кеша: при деплое менять CACHE_VERSION (устаревшие payload'ы другого
  * билда не должны переживать деплой).
  */
-const CACHE_VERSION = "silentium-static-v1";
+const CACHE_VERSION = "silentium-static-v2";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGES_CACHE = `${CACHE_VERSION}-pages`;
 const RSC_CACHE = `${CACHE_VERSION}-rsc`;

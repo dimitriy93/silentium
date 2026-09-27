@@ -4,6 +4,7 @@
  * Реестр расширяемый: новые действия (sleep, read, code, exercise, eat)
  * добавляются одной записью в ANIMATIONS.
  */
+import { withBasePath } from "@/lib/base-path";
 
 export type AvatarDirection = "down" | "up" | "left" | "right";
 
@@ -28,7 +29,9 @@ const FRAME_COUNTS: Record<string, number> = {
 
 function frames(action: string, direction: string): string[] {
   const count = FRAME_COUNTS[`${action}/${direction}`] ?? FRAME_COUNTS[action];
-  return Array.from({ length: count }, (_, i) => `/avatar/${action}/${direction}/${i + 1}.png`);
+  return Array.from({ length: count }, (_, i) =>
+    withBasePath(`/avatar/${action}/${direction}/${i + 1}.png`),
+  );
 }
 
 export const ANIMATIONS: Record<string, SpriteAnimation> = {
