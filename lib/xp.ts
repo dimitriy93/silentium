@@ -9,6 +9,21 @@
  * первый переход (1 → 2) происходит на 100 × 2^1.6 ≈ 303 XP.
  */
 
+/**
+ * Описания XP-событий. Единый источник строк: записываются в событие при
+ * начислении (lib/local/mutations.ts) и служат признаком раздела для
+ * характеристик персонажа (lib/character.ts) — менять только вместе.
+ */
+export const XP_DESCRIPTIONS = {
+  thought: "Записана мысль",
+  training: "Тренировка",
+  nutrition: "Питание",
+  learning: "Обучение",
+  creation: "Созидание",
+  asceticism: "Выполнена аскеза",
+  day: "День продолжен",
+} as const;
+
 /** Порог общего XP для достижения уровня L (L ≥ 2 как граница перехода). */
 export function requiredXp(level: number): number {
   return Math.floor(100 * Math.pow(level, 1.6));

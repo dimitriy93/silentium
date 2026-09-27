@@ -25,6 +25,7 @@ import OrbitalLoader from "@/components/orbital-loader";
 import PendingDot from "@/components/pending-dot";
 import { usePendingRows } from "@/hooks/use-pending-rows";
 import AvatarRoom from "@/components/avatar-room/avatar-room";
+import CharacterCard from "@/components/character-card";
 
 /**
  * Главный экран «Сегодня»: дата, быстрый ввод мысли, сводка Пути,
@@ -75,6 +76,8 @@ export default function TodayClient() {
           {today ? formatWeekdayRu(today) : ""}
         </p>
       </header>
+
+      <CharacterCard />
 
       <DayStreakCard streak={dayStreak} />
 

@@ -13,6 +13,7 @@ import {
   type XpAwardPlan,
   type XpToastDetail,
 } from "@/lib/local/xp";
+import { XP_DESCRIPTIONS } from "@/lib/xp";
 import type { LocalDb } from "@/lib/local/db";
 import type { LocalXpEvent } from "@/lib/local/types";
 
@@ -67,7 +68,7 @@ function xpPlanFor(
       return {
         type: "thought",
         amount: XP_AMOUNTS.thought,
-        description: "Записана мысль",
+        description: XP_DESCRIPTIONS.thought,
         sourceId: typeof v.id === "string" ? v.id : "",
         entryDate,
       };
@@ -75,7 +76,7 @@ function xpPlanFor(
       return {
         type: "path",
         amount: XP_AMOUNTS.path,
-        description: "Тренировка",
+        description: XP_DESCRIPTIONS.training,
         sourceId: typeof v.id === "string" ? v.id : "",
         entryDate,
       };
@@ -83,7 +84,7 @@ function xpPlanFor(
       return {
         type: "path",
         amount: XP_AMOUNTS.path,
-        description: "Обучение",
+        description: XP_DESCRIPTIONS.learning,
         sourceId: typeof v.id === "string" ? v.id : "",
         entryDate,
       };
@@ -91,7 +92,7 @@ function xpPlanFor(
       return {
         type: "path",
         amount: XP_AMOUNTS.path,
-        description: "Созидание",
+        description: XP_DESCRIPTIONS.creation,
         sourceId: typeof v.id === "string" ? v.id : "",
         entryDate,
       };
@@ -99,7 +100,7 @@ function xpPlanFor(
       return {
         type: "path",
         amount: XP_AMOUNTS.path,
-        description: "Питание",
+        description: XP_DESCRIPTIONS.nutrition,
         sourceId: `nutrition:${entryDate ?? ""}`,
         entryDate,
       };
@@ -108,7 +109,7 @@ function xpPlanFor(
       return {
         type: "asceticism",
         amount: XP_AMOUNTS.asceticism,
-        description: "Выполнена аскеза",
+        description: XP_DESCRIPTIONS.asceticism,
         sourceId: `asceticismDone:${String(v.asceticismId)}:${entryDate ?? ""}`,
         entryDate,
       };
@@ -205,7 +206,7 @@ async function commit(
           const dayAward: XpAwardPlan = {
             type: "day",
             amount: XP_AMOUNTS.day,
-            description: "День продолжен",
+            description: XP_DESCRIPTIONS.day,
             sourceId: `day:${dayPlan.entryDate}`,
             entryDate: dayPlan.entryDate,
           };

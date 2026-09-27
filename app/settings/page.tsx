@@ -5,6 +5,7 @@ import SignOutButton from "@/components/sign-out-button";
 import StorageSection from "@/components/storage-section";
 import SyncSection from "@/components/sync-section";
 import XpProfileSection from "@/components/xp-profile-section";
+import PathStatsSection from "@/components/path-stats-section";
 import { formatDateRu } from "@/lib/format";
 import { getCurrentUser } from "@/lib/supabase/server";
 
@@ -41,6 +42,8 @@ export default async function SettingsPage() {
         </section>
 
         <XpProfileSection />
+
+        <PathStatsSection />
 
         <SyncSection />
 

@@ -2,15 +2,20 @@
 
 import { useCacheQuery } from "@/hooks/use-cache-query";
 import { readRecentXpEvents, readXpProfileView } from "@/lib/local/xp";
+import { readCharacterView } from "@/lib/local/character";
+import type { CharacterView } from "@/lib/local/character";
 import type { LocalXpEvent } from "@/lib/local/types";
+import { getRankTitle } from "@/lib/ranks";
 import { relativeDayLabel, todayLocalDate } from "@/lib/format";
 import OrbitalLoader from "@/components/orbital-loader";
 
 /**
  * Опыт и уровень в Профиле — только из локальной базы (Local First):
  * ни серверного запроса при открытии, ни расчёта на сервере. Уровень
- * вычисляется из общего XP формулой lib/xp.ts; «Последний опыт» —
- * последние 5 XP-событий из IndexedDB.
+ * вычисляется из общего XP формулой lib/xp.ts, ранг — по уровню
+ * (lib/ranks.ts), характеристики — из XP-событий (lib/local/character.ts,
+ * кэшированное вычисление). «Последний опыт» — последние 5 XP-событий
+ * из IndexedDB.
  */
 
 function formatEventTime(createdAt: string): string {
@@ -29,6 +34,7 @@ function formatNumber(value: number): string {
 export default function XpProfileSection() {
   const profile = useCacheQuery(readXpProfileView, []);
   const events = useCacheQuery(readRecentXpEvents, []);
+  const character = useCacheQuery(readCharacterView, []);
 
   if (profile === null) {
     return (
@@ -46,6 +52,9 @@ export default function XpProfileSection() {
 
       <p className="font-chronicle text-[22px] font-bold text-[var(--gold)]">
         Уровень {profile.level}
+      </p>
+      <p className="font-chronicle mt-0.5 text-sm uppercase tracking-[0.2em] text-[var(--bronze-bright)]">
+        {getRankTitle(profile.level)}
       </p>
 
       {/* Прогресс до следующего уровня */}
@@ -72,6 +81,8 @@ export default function XpProfileSection() {
           : "Порог следующего уровня достигнут"}
       </p>
 
+      {character !== null ? <CharacteristicsBlock view={character} /> : null}
+
       {/* Последний опыт */}
       <h3 className="mt-5 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ink-faint)]">
         Последний опыт
@@ -97,5 +108,31 @@ export default function XpProfileSection() {
         </ul>
       )}
     </section>
+  );
+}
+
+/** Характеристики персонажа: уровни вычислены из XP-событий (кэш). */
+function CharacteristicsBlock({ view }: { view: CharacterView }) {
+  return (
+    <>
+      <h3 className="mt-5 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ink-faint)]">
+        Характеристики
+      </h3>
+      <ul className="mt-1 divide-y divide-[var(--card-edge)]">
+        {view.characteristics.map((c) => (
+          <li key={c.key} className="flex items-baseline justify-between gap-3 py-2">
+            <span className="text-sm text-[var(--ink-secondary)]">{c.title}</span>
+            <span className="text-sm">
+              <span className="font-chronicle text-base font-bold text-[var(--gold)]">
+                {c.level}
+              </span>
+              <span className="ml-2 text-[11px] text-[var(--ink-faint)]">
+                {formatNumber(c.xp)} XP
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
