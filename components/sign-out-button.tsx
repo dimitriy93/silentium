@@ -20,7 +20,7 @@ export default function SignOutButton() {
       if (
         pending > 0 &&
         !confirm(
-          `${pending} записей ещё не отправлены в Башню и будут потеряны. Выйти?`,
+          `${pending} записей ещё не синхронизированы и будут потеряны. Выйти?`,
         )
       ) {
         setBusy(false);

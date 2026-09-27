@@ -16,7 +16,7 @@ import PendingDot from "@/components/pending-dot";
  *
  * Записи дня мгновенно читаются из локального кеша; мутации идут через
  * локальный путь (кеш + outbox): запись появляется мгновенно, при сети
- * сразу уходит в Башню, офлайн — ждёт в очереди.
+ * на сервер вручную, офлайн — ждёт в очереди.
  */
 export default function LeisureClient() {
   const [title, setTitle] = useState("");

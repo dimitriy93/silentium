@@ -398,7 +398,7 @@ export async function pushOutbox(ops: OutboxOp[]): Promise<Action<PushOpResult[]
       results.push({
         opId: envelope.data.opId,
         ok: false,
-        error: "Башня не смогла применить запись",
+        error: "Сервер не смог применить запись",
       });
     }
   }

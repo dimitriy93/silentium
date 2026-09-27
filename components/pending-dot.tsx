@@ -9,7 +9,7 @@ export default function PendingDot() {
   return (
     <span
       aria-hidden="true"
-      title="Ещё не отправлено в Башню"
+      title="Ещё не синхронизировано"
       className="block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--bronze-bright)] opacity-70"
     />
   );

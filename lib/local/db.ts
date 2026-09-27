@@ -15,15 +15,15 @@ import type {
 } from "@/lib/local/types";
 
 /**
- * Локальный кеш (IndexedDB через Dexie) — этапы 1–2 offline-first плана
- * (docs/offline-write-sync-design.md). Сервер остаётся источником истины:
- * кеш зеркалирует журнальные таблицы пользователя и заменяется снапшотом
- * при синхронизации; мутации пишутся в кеш одновременно с постановкой в
- * очередь исходящих операций `outbox` (push на сервер отдельным циклом).
+ * Локальная база (IndexedDB через Dexie) — единственный источник истины
+ * (модель Local First). Все экраны читают журнальные таблицы отсюда;
+ * мутации пишутся сюда одновременно с постановкой в очередь исходящих
+ * операций `outbox`, которые уходят на сервер только по явной команде
+ * пользователя — ручная синхронизация в Профиле.
  *
  * Схема версионируется: будущие изменения — новые this.version(n) с
- * апгрейдами, без re-pull. Версия 2 добавила только таблицу outbox —
- * апгрейд пустой, кеш этапа 1 не трогается.
+ * апгрейдами. Версия 2 добавила таблицу outbox, версия 3 — изображения
+ * (бинарные blob'ы, переживают перезагрузку и работают без сети).
  */
 class SilentiumLocalDb extends Dexie {
   thoughts!: Table<LocalThought, string>;
@@ -40,8 +40,10 @@ class SilentiumLocalDb extends Dexie {
   dayStreak!: Table<{ key: string; view: LocalDayStreakView }, string>;
   /** Метаданные кеша: кто и когда делал снапшот. */
   meta!: Table<CacheMeta, string>;
-  /** Очередь исходящих операций (этап 2): порядок применения = порядок вставки. */
+  /** Очередь исходящих операций: порядок применения = порядок вставки. */
   outbox!: Table<OutboxEntry, number>;
+  /** Локальные изображения: blob по символьному ключу. */
+  images!: Table<StoredImage, string>;
 
   constructor() {
     super("silentium");
@@ -62,6 +64,10 @@ class SilentiumLocalDb extends Dexie {
     this.version(2).stores({
       outbox: "++seq, opId, status, entity, rowId",
     });
+    // v3: локальные изображения (IndexedDB), апгрейд пустой.
+    this.version(3).stores({
+      images: "key",
+    });
   }
 }
 
@@ -78,6 +84,16 @@ export interface CacheMeta {
   key: string;
   userId: string;
   pulledAt: string;
+}
+
+/** Строка таблицы изображений: бинарные данные живут в IndexedDB. */
+export interface StoredImage {
+  key: string;
+  blob: Blob;
+  /** ISO: когда изображение было сохранено локально. */
+  savedAt: string;
+  /** Исходный MIME-тип — для пересборки Blob при чтении. */
+  mimeType: string;
 }
 
 export const SNAPSHOT_META_KEY = "snapshot";

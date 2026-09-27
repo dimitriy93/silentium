@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Image from "next/image";
 import OrbitalLoader from "@/components/orbital-loader";
 import PendingDot from "@/components/pending-dot";
 import { useCacheQuery } from "@/hooks/use-cache-query";
 import { usePendingRows } from "@/hooks/use-pending-rows";
 import { readPathDay } from "@/lib/local/queries";
 import { writes } from "@/lib/local/mutations";
+import { useLocalImage } from "@/lib/local/images";
 import type { LocalPathDay } from "@/lib/local/types";
 import { todayLocalDate } from "@/lib/format";
 
@@ -16,9 +16,12 @@ import { todayLocalDate } from "@/lib/format";
  * ОГОНЬ — журнал активности; ВОДА — КБЖУ + заметка (одна запись на день);
  * ВОЗДУХ — «я изучил»; ЗЕМЛЯ — «я создал».
  *
- * Данные дня мгновенно читаются из локального кеша; все мутации идут через
- * локальный путь (кеш + outbox): запись появляется мгновенно, при сети сразу
- * уходит в Башню, офлайн — ждёт в очереди (бронзовая точка у записи).
+ * Данные дня мгновенно читаются из локальной базы (Local First); мутации
+ * пишутся туда же и в очередь outbox — на сервер уходят только при ручной
+ * синхронизации в Профиле (бронзовая точка у несинхронизированной записи).
+ *
+ * Иллюстрации Пути живут в локальном хранилище изображений (IndexedDB):
+ * один раз забираются по сети и дальше отображаются без интернета.
  */
 
 const TABS = [
@@ -61,18 +64,11 @@ export default function PathClient() {
         aria-live="polite"
       >
         {PATH_IMAGES.map(({ key, src, alt }) => (
-          <Image
+          <PathImage
             key={key}
             src={src}
-            alt={tab === key || (tab === null && key === "neutral") ? alt : ""}
-            fill
-            sizes="(max-width: 480px) calc(100vw - 2.5rem), 440px"
-            className={
-              "object-contain transition-opacity duration-500 ease-out " +
-              (tab === key || (tab === null && key === "neutral")
-                ? "opacity-100"
-                : "pointer-events-none opacity-0")
-            }
+            alt={alt}
+            visible={tab === key || (tab === null && key === "neutral")}
           />
         ))}
       </div>
@@ -127,6 +123,25 @@ export default function PathClient() {
 }
 
 type TabProps = { day: LocalPathDay };
+
+/** Слой иллюстрации: локальная копия из IndexedDB (после первого сетевого захода). */
+function PathImage({ src, alt, visible }: { src: string; alt: string; visible: boolean }) {
+  const url = useLocalImage(src);
+  return (
+    // next/image не подходит: оптимизатор требует сервер. Локальная копия
+    // показывается <img>'ом с object URL — без сети и без сервера.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url ?? undefined}
+      alt={visible ? alt : ""}
+      aria-hidden={!visible}
+      className={
+        "absolute inset-0 h-full w-full object-contain transition-opacity duration-500 ease-out " +
+        (visible && url ? "opacity-100" : "pointer-events-none opacity-0")
+      }
+    />
+  );
+}
 
 /** Строка записи с меткой несинхронизированности. */
 function EntryRow({

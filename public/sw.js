@@ -2,12 +2,12 @@
  * Service Worker Silentium.
  * Стратегии:
  *  - навигации (HTML): network-first, офлайн — последний закешированный ответ;
- *  - статика Next (_next/static), иконки, ассеты комнаты/аватара: cache-first
- *    (файлы содержат хеш в имени или неизменяемы);
+ *  - статика Next (_next/static), иконки, ассеты комнаты/аватара, иллюстрации
+ *    Пути и трофеи: cache-first (файлы неизменяемы или содержат хеш в имени);
  *  - остальное (server actions, API): только сеть.
  * Версия кеша: при деплое менять CACHE_VERSION.
  */
-const CACHE_VERSION = "silentium-v3";
+const CACHE_VERSION = "silentium-v4";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGES_CACHE = `${CACHE_VERSION}-pages`;
 
@@ -48,7 +48,9 @@ function isStaticAsset(url) {
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
     url.pathname.startsWith("/room/") ||
-    url.pathname.startsWith("/avatar/")
+    url.pathname.startsWith("/avatar/") ||
+    url.pathname.startsWith("/path/") ||
+    url.pathname.startsWith("/achievements/")
   );
 }
 

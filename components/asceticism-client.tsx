@@ -15,7 +15,7 @@ import OrbitalLoader from "@/components/orbital-loader";
  *
  * Список мгновенно читается из локального кеша; все мутации идут через
  * локальный путь (кеш + outbox): отметки и новые аскезы появляются
- * мгновенно, при сети сразу уходят в Башню, офлайн — ждут в очереди.
+ * мгновенно, при сети сразу уходят на сервер вручную; офлайн — ждут в очереди.
  */
 export default function AsceticismClient() {
   const [showForm, setShowForm] = useState(false);

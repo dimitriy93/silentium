@@ -84,11 +84,11 @@ export default function BottomNav() {
 
         <div ref={centerRef} className="relative flex flex-1 justify-center">
           {menuOpen && (
-            <div className="absolute bottom-full left-1/2 z-10 mb-2.5 w-44 -translate-x-1/2">
+            <div className="absolute bottom-full left-1/2 z-10 mb-2.5 -translate-x-1/2">
               <div
                 role="menu"
                 aria-label="Добавить запись"
-                className="nav-menu stone-nav flex flex-col gap-0.5 rounded-xl p-1.5"
+                className="stone-nav nav-menu flex flex-row flex-wrap justify-center gap-3 rounded-2xl p-3"
               >
                 {menuItems.map(({ href, label, icon: Icon }) => (
                   <Link
@@ -96,10 +96,17 @@ export default function BottomNav() {
                     role="menuitem"
                     href={href}
                     onClick={() => setMenuOpen(false)}
-                    className="nav-menu-item flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13px] font-semibold text-[var(--ink-secondary)] active:bg-[var(--pill-active)] active:text-[var(--gold)]"
+                    className={
+                      "flex w-[68px] flex-col items-center gap-1 rounded-xl px-1 py-2 transition-colors " +
+                      (pathname.startsWith(href + "/") || pathname === href
+                        ? "bg-[var(--pill-active)] text-[var(--gold)]"
+                        : "text-[var(--ink-secondary)] hover:text-[var(--ink)] active:bg-[var(--pill-active)] active:text-[var(--gold)]")
+                    }
                   >
-                    <Icon active />
-                    <span>{label}</span>
+                    <span className="flex h-[36px] w-[36px] items-center justify-center rounded-full border border-[#5c4826] bg-[linear-gradient(180deg,#3f3524,#2b2418)] text-[var(--gold)] shadow-[0_4px_10px_rgba(0,0,0,0.35)]">
+                      <Icon active={pathname.startsWith(href + "/") || pathname === href} />
+                    </span>
+                    <span className="text-[10px] leading-none font-semibold">{label}</span>
                   </Link>
                 ))}
               </div>

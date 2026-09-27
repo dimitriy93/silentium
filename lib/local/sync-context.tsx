@@ -3,45 +3,35 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { pullSnapshot } from "@/actions/snapshot";
-import { pushOutbox } from "@/actions/sync";
-import { SYNC_THROTTLE_MS } from "@/lib/local/constants";
 import { lastSnapshotAt } from "@/lib/local/queries";
 import {
-  applyPushResults,
-  batchToWire,
-  cachedUserId,
-  discardOutboxOp,
   listFailedOps,
   outboxStats,
   retryOutboxOp,
+  discardOutboxOp,
   revertSendingToPending,
   subscribeOutbox,
-  takePushBatch,
 } from "@/lib/local/outbox";
 import { writeSnapshot } from "@/lib/local/writes";
 import type { OutboxEntity } from "@/lib/local/outbox-types";
 
 /**
- * Полный цикл синхронизации (этап 2, docs/offline-write-sync-design.md,
- * разделы 5 и 7): сначала push очереди outbox на сервер, затем pull снапшота
- * (pending-строки переживают снапшот — оверлей в writeSnapshot).
+ * Local First: локальная база — единственный источник истины, приложение
+ * работает без сети. Никаких автоматических синхронизаций: ни push очереди,
+ * ни pull снапшота, ни фоновых таймеров, ни online/offline listeners.
+ * Общение с сервером начинается только по явной команде пользователя —
+ * кнопка «Синхронизировать данные» в Профиле (components/sync-section.tsx).
  *
- * Триггеры push: событие online, возврат вкладки, каждая постановка в очередь
- * (с дебаунсом, чтобы сгруппировать быстрые операции в один батч), таймер ~1
- * мин, ручной «Повторить». Сетевой сбой батча — экспоненциальный backoff
- * раннера (1 мин · 2^n, до 1 ч). Операция после MAX_ATTEMPTS неудач — dead
- * letter: ждёт ручного «Повторить»/«Удалить» (панель внизу экрана).
- *
- * На страницах входа/регистрации синхронизация не запускается. Ошибка
- * авторизации трактуется как «гость»/истёкшая сессия и ошибкой очереди не
- * считается — операции остаются pending до повторного входа.
+ * Провайдер отвечает за три вещи:
+ * 1) version — инкремент после каждой локальной мутации (экраны перечитывают
+ *    локальную базу) и после ручной загрузки с сервера;
+ * 2) счётчики очереди и dead letter (панель «Повторить»/«Удалить» после
+ *    неудачной ручной отправки);
+ * 3) разовая гидратация: если локальная база пуста (первый запуск после
+ *    входа, локальные данные ещё не заведены), единственный раз выполняется
+ *    pull снапшота — иначе приложению не с чем работать. После этого ни
+ *    одного запроса к серверу при старте.
  */
-
-const PUSH_DEBOUNCE_MS = 2500;
-const PUSH_BACKOFF_BASE_MS = 60_000;
-const PUSH_BACKOFF_MAX_MS = 3_600_000;
-const SENT_NOTICE_MS = 3000;
-const ERROR_NOTICE_MS = 4000;
 
 interface FailedOpView {
   opId: string;
@@ -51,15 +41,9 @@ interface FailedOpView {
 }
 
 interface SyncState {
-  /** Инкрементируется после снапшота и после каждой локальной мутации. */
+  /** Инкрементируется после локальной мутации и после загрузки с сервера. */
   version: number;
-  syncing: boolean;
-  /** Кеш уже был гидратирован ранее (повторный запуск) — для индикатора. */
-  hydratedBefore: boolean;
-  /** Последняя попытка синхронизации не удалась (сеть/Башня недоступны). */
-  error: boolean;
-  online: boolean;
-  /** Хроники, ожидающие отправки (pending + sending). */
+  /** Хроники, ожидающие ручной синхронизации (pending + sending). */
   pendingCount: number;
   /** Операции dead letter — для панели «Повторить»/«Удалить». */
   failedOps: FailedOpView[];
@@ -69,10 +53,6 @@ interface SyncState {
 
 const SyncContext = createContext<SyncState>({
   version: 0,
-  syncing: false,
-  hydratedBefore: false,
-  error: false,
-  online: true,
   pendingCount: 0,
   failedOps: [],
   retryFailed: () => {},
@@ -88,30 +68,18 @@ const GUEST_ROUTES = ["/login", "/register"];
 export default function SyncProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [version, setVersion] = useState(0);
-  const [syncing, setSyncing] = useState(false);
-  const [hydratedBefore, setHydratedBefore] = useState(false);
-  const [error, setError] = useState(false);
-  const [pushError, setPushError] = useState(false);
-  /** Ненулевой nonce: показать короткое «Хроники отправлены». */
-  const [sentNotice, setSentNotice] = useState(0);
-  const [online, setOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [failedOps, setFailedOps] = useState<FailedOpView[]>([]);
+  /** База пуста и разовый pull не удался (нет сети) — тихое предложение повторить. */
+  const [hydrationFailed, setHydrationFailed] = useState(false);
+  const hydratingRef = useRef(false);
 
-  const inFlight = useRef(false);
-  const pushBusy = useRef(false);
-  const lastAttempt = useRef(0);
-  const nextPushAt = useRef(0);
-  const networkFails = useRef(0);
-  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingBefore = useRef(0);
   const guestRef = useRef(false);
   guestRef.current = GUEST_ROUTES.includes(pathname);
 
-  /** Пересчитать счётчики очереди (после enqueue, push, pull, ручных действий). */
+  /** Пересчитать счётчики очереди (после мутации, ручных действий). */
   const refreshOutbox = useCallback(async () => {
     const stats = await outboxStats();
-    pendingBefore.current = stats.pending;
     setPendingCount(stats.pending);
     const failed = await listFailedOps();
     setFailedOps(
@@ -124,153 +92,62 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
     );
   }, []);
 
-  const scheduleBackoff = useCallback(() => {
-    networkFails.current += 1;
-    nextPushAt.current =
-      Date.now() +
-      Math.min(PUSH_BACKOFF_BASE_MS * 2 ** (networkFails.current - 1), PUSH_BACKOFF_MAX_MS);
-  }, []);
-
-  /** Один push-заход: батч pending/failed → pushOutbox → подтверждения. */
-  const push = useCallback(async (): Promise<"applied" | "idle" | "failed"> => {
-    if (pushBusy.current) return "idle";
-    if (typeof navigator !== "undefined" && !navigator.onLine) return "idle";
-    if (Date.now() < nextPushAt.current) return "idle";
-    const userId = await cachedUserId();
-    if (!userId) return "idle";
-
-    pushBusy.current = true;
+  /** Разовая гидратация пустой базы (первый запуск / после выхода). */
+  const hydrateOnce = useCallback(async () => {
+    if (hydratingRef.current) return;
+    hydratingRef.current = true;
+    setHydrationFailed(false);
     try {
-      const batch = await takePushBatch(userId);
-      if (batch.length === 0) return "idle";
-      try {
-        const res = await pushOutbox(batchToWire(batch));
-        if (!res.ok) {
-          // Истёкшая сессия и прочие ошибки уровня пакета: операции остаются
-          // pending — повтор после восстановления сети/входа.
-          await revertSendingToPending();
-          scheduleBackoff();
-          if (res.error !== "Требуется авторизация") setPushError(true);
-          return "failed";
-        }
-        const applied = await applyPushResults(batch, res.data);
-        networkFails.current = 0;
-        nextPushAt.current = 0;
-        return applied > 0 ? "applied" : "idle";
-      } catch {
-        // Сетевой сбой батча целиком: всё обратно в pending, backoff раннера.
-        await revertSendingToPending();
-        scheduleBackoff();
-        setPushError(true);
-        return "failed";
+      const res = await pullSnapshot();
+      if (res.ok) {
+        await writeSnapshot(res.data);
+        await refreshOutbox();
+        setVersion((v) => v + 1);
+      } else if (res.error !== "Требуется авторизация") {
+        setHydrationFailed(true);
       }
+    } catch {
+      setHydrationFailed(true);
     } finally {
-      pushBusy.current = false;
+      hydratingRef.current = false;
     }
-  }, [scheduleBackoff]);
-
-  const pull = useCallback(async (): Promise<boolean> => {
-    const res = await pullSnapshot();
-    if (res.ok) {
-      const written = await writeSnapshot(res.data);
-      if (written) setHydratedBefore(true);
-      return written;
-    }
-    if (res.error !== "Требуется авторизация") setError(true);
-    return false;
-  }, []);
-
-  /** Полный цикл: push → pull. Локальные изменения уходят, кеш сверяется. */
-  const runCycle = useCallback(
-    async (force = false) => {
-      if (inFlight.current || guestRef.current) return;
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        setOnline(false);
-        return;
-      }
-      const now = Date.now();
-      if (!force && now - lastAttempt.current < SYNC_THROTTLE_MS) return;
-      lastAttempt.current = now;
-      inFlight.current = true;
-      setSyncing(true);
-      setError(false);
-      setOnline(true);
-      try {
-        const wasLongQueue = pendingBefore.current >= 3;
-        const pushResult = await push();
-        const written = await pull();
-        if (written) setVersion((v) => v + 1);
-        if (pushResult === "applied" && wasLongQueue) {
-          // Батч закрыл длинную офлайн-сессию — короткое тихое подтверждение.
-          setSentNotice((n) => n + 1);
-        }
-      } catch {
-        setError(true);
-      } finally {
-        inFlight.current = false;
-        setSyncing(false);
-        void refreshOutbox();
-      }
-    },
-    [push, pull, refreshOutbox],
-  );
+  }, [refreshOutbox]);
 
   useEffect(() => {
     void (async () => {
-      // Операции, застрявшие в sending (вкладка закрылась во время push),
-      // возвращаются в очередь; повторный push тех же операций безопасен
+      // Операции, застрявшие в sending (вкладка закрылась во время отправки),
+      // возвращаются в очередь; повторная отправка тех же операций безопасна
       // (идемпотентность, раздел 9 дизайн-документа).
       await revertSendingToPending();
-      const pulledAt = await lastSnapshotAt();
-      if (pulledAt) setHydratedBefore(true);
       await refreshOutbox();
+
+      // Разовая гидратация пустой базы: локальных данных ещё нет ни когда —
+      // один pull, дальше приложение живёт только от локальной базы.
+      if (guestRef.current) return;
+      const pulledAt = await lastSnapshotAt();
+      if (!pulledAt) void hydrateOnce();
     })();
-    void runCycle();
-    if (typeof navigator !== "undefined") setOnline(navigator.onLine);
+  }, [refreshOutbox, hydrateOnce]);
 
-    const onOnline = () => {
-      setOnline(true);
-      void runCycle(true);
-    };
-    const onOffline = () => setOnline(false);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void runCycle();
-    };
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    document.addEventListener("visibilitychange", onVisible);
-    const periodic = setInterval(() => void runCycle(), SYNC_THROTTLE_MS);
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-      document.removeEventListener("visibilitychange", onVisible);
-      clearInterval(periodic);
-    };
-  }, [runCycle, refreshOutbox]);
-
-  // Локальная мутация: экраны перечитывают кеш, push планируется с дебаунсом.
+  // Локальная мутация: экраны перечитывают локальную базу. На сервер ничего
+  // не отправляется — отправка только вручную из Профиля.
   useEffect(
     () =>
       subscribeOutbox(() => {
         void refreshOutbox();
         setVersion((v) => v + 1);
-        if (pushTimer.current) clearTimeout(pushTimer.current);
-        pushTimer.current = setTimeout(() => void runCycle(true), PUSH_DEBOUNCE_MS);
       }),
-    [refreshOutbox, runCycle],
+    [refreshOutbox],
   );
 
   const retryFailed = useCallback(
     (opId: string) => {
       void (async () => {
         await retryOutboxOp(opId);
-        nextPushAt.current = 0;
-        networkFails.current = 0;
         await refreshOutbox();
-        void runCycle(true);
       })();
     },
-    [runCycle, refreshOutbox],
+    [refreshOutbox],
   );
 
   const discardFailed = useCallback(
@@ -287,33 +164,35 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
   const value = useMemo(
     () => ({
       version,
-      syncing,
-      hydratedBefore,
-      error,
-      online,
       pendingCount,
       failedOps,
       retryFailed,
       discardFailed,
     }),
-    [version, syncing, hydratedBefore, error, online, pendingCount, failedOps, retryFailed, discardFailed],
+    [version, pendingCount, failedOps, retryFailed, discardFailed],
   );
 
   return (
     <SyncContext.Provider value={value}>
       {children}
-      <SyncIndicator
-        syncing={syncing}
-        hydratedBefore={hydratedBefore}
-        error={error}
-        pushError={pushError}
-        sentNotice={sentNotice}
-        online={online}
-        pendingCount={pendingCount}
-        failedOps={failedOps}
-        onRetry={retryFailed}
-        onDiscard={discardFailed}
-      />
+      {hydrationFailed && failedOps.length === 0 ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-[var(--card-edge)] bg-[var(--card)]/85 px-4 py-1.5 text-[11px] text-[var(--ink-faint)] shadow-lg backdrop-blur"
+        >
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[#c96a5a]" />
+          Нет связи с сервером — данные не загружены
+          <button
+            type="button"
+            className="text-[var(--gold)] active:opacity-70"
+            onClick={() => void hydrateOnce()}
+          >
+            Повторить
+          </button>
+        </div>
+      ) : null}
+      <FailedOpsPanel failedOps={failedOps} onRetry={retryFailed} onDiscard={discardFailed} />
     </SyncContext.Provider>
   );
 }
@@ -329,170 +208,54 @@ const ENTITY_LABELS: Record<OutboxEntity, string> = {
   asceticismLog: "Отметка аскезы",
 };
 
-interface IndicatorProps {
-  syncing: boolean;
-  hydratedBefore: boolean;
-  error: boolean;
-  pushError: boolean;
-  /** Ненулевой nonce — показать короткое подтверждение отправки. */
-  sentNotice: number;
-  online: boolean;
-  pendingCount: number;
+interface PanelProps {
   failedOps: FailedOpView[];
   onRetry: (opId: string) => void;
   onDiscard: (opId: string) => void;
 }
 
 /**
- * Индикатор синхронизации и dead letter. Всё молчит, пока всё хорошо:
- * офлайн и несинхронизированные записи — один тихий индикатор внизу,
- * отклонённые операции — панель с «Повторить»/«Удалить».
+ * Панель отклонённых операций. Появляется только когда сервер при ручной
+ * синхронизации отклонил запись: пользователь должен решить её судьбу.
+ * Пока всё хорошо — ничего не рисуется.
  */
-function SyncIndicator({
-  syncing,
-  hydratedBefore,
-  error: pullError,
-  pushError,
-  sentNotice,
-  online,
-  pendingCount,
-  failedOps,
-  onRetry,
-  onDiscard,
-}: IndicatorProps) {
-  const [showError, setShowError] = useState(false);
-  const [showPushError, setShowPushError] = useState(false);
-  const [showSent, setShowSent] = useState(false);
-
-  useEffect(() => {
-    if (!pullError) {
-      setShowError(false);
-      return;
-    }
-    setShowError(true);
-    const timer = setTimeout(() => setShowError(false), ERROR_NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [pullError]);
-
-  useEffect(() => {
-    if (!pushError) {
-      setShowPushError(false);
-      return;
-    }
-    setShowPushError(true);
-    const timer = setTimeout(() => setShowPushError(false), ERROR_NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [pushError]);
-
-  useEffect(() => {
-    if (!sentNotice) return;
-    setShowSent(true);
-    const timer = setTimeout(() => setShowSent(false), SENT_NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [sentNotice]);
-
-  // Dead letter заменяет индикатор: пользователь должен увидеть действия.
-  if (failedOps.length > 0) {
-    return (
-      <div className="fixed bottom-24 left-1/2 z-40 w-[calc(100%-2.5rem)] max-w-md -translate-x-1/2 space-y-2">
-        {failedOps.map((op) => (
-          <div key={op.opId} className="bronze-card bronze-edge px-3 py-2.5 shadow-lg">
-            <p className="text-xs leading-snug text-[var(--ink-secondary)]">
-              {ENTITY_LABELS[op.entity]} от{" "}
-              {new Date(op.createdAt).toLocaleString("ru-RU", {
-                day: "numeric",
-                month: "short",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}{" "}
-              — не удалось отправить
-            </p>
-            <div className="mt-1.5 flex gap-4 text-xs">
-              <button
-                type="button"
-                className="text-[var(--gold)] active:opacity-70"
-                onClick={() => onRetry(op.opId)}
-              >
-                Повторить
-              </button>
-              <button
-                type="button"
-                className="text-[#a05a4e] active:text-[#c96a5a]"
-                onClick={() => onDiscard(op.opId)}
-              >
-                Удалить
-              </button>
-            </div>
+function FailedOpsPanel({ failedOps, onRetry, onDiscard }: PanelProps) {
+  if (failedOps.length === 0) return null;
+  return (
+    <div className="fixed bottom-24 left-1/2 z-40 w-[calc(100%-2.5rem)] max-w-md -translate-x-1/2 space-y-2">
+      {failedOps.map((op) => (
+        <div key={op.opId} className="bronze-card bronze-edge px-3 py-2.5 shadow-lg">
+          <p className="text-xs leading-snug text-[var(--ink-secondary)]">
+            {ENTITY_LABELS[op.entity]} от{" "}
+            {new Date(op.createdAt).toLocaleString("ru-RU", {
+              day: "numeric",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}{" "}
+            — не удалось синхронизировать
+          </p>
+          {op.error ? (
+            <p className="mt-1 text-[11px] leading-snug text-[var(--ink-faint)]">{op.error}</p>
+          ) : null}
+          <div className="mt-1.5 flex gap-4 text-xs">
+            <button
+              type="button"
+              className="text-[var(--gold)] active:opacity-70"
+              onClick={() => onRetry(op.opId)}
+            >
+              Повторить
+            </button>
+            <button
+              type="button"
+              className="text-[#a05a4e] active:text-[#c96a5a]"
+              onClick={() => onDiscard(op.opId)}
+            >
+              Удалить
+            </button>
           </div>
-        ))}
-      </div>
-    );
-  }
-
-  // Офлайн: тихий постоянный индикатор — записи сохраняются на устройстве.
-  if (!online && (hydratedBefore || pendingCount > 0)) {
-    return (
-      <div
-        role="status"
-        aria-live="polite"
-        className="fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--card-edge)] bg-[var(--card)]/85 px-3 py-1.5 text-[11px] text-[var(--ink-faint)] shadow-lg backdrop-blur"
-      >
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[var(--ink-faint)] opacity-60" />
-        Нет связи с Башней{pendingCount > 0 ? ` — ${pendingLabel(pendingCount)} на устройстве` : " — записи сохраняются на устройстве"}
-      </div>
-    );
-  }
-
-  if (showSent) {
-    return (
-      <div
-        role="status"
-        aria-live="polite"
-        className="fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--card-edge)] bg-[var(--card)]/85 px-3 py-1.5 text-[11px] text-[var(--ink-faint)] shadow-lg backdrop-blur"
-      >
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[#5d7a4a]" />
-        Хроники отправлены
-      </div>
-    );
-  }
-
-  if (showError || showPushError) {
-    return (
-      <div
-        role="status"
-        aria-live="polite"
-        className="fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--card-edge)] bg-[var(--card)]/85 px-3 py-1.5 text-[11px] text-[var(--ink-faint)] shadow-lg backdrop-blur"
-      >
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[#c96a5a]" />
-        {showPushError ? "Не удалось отправить хроники, повторю позже" : "Нет связи с Башней — показаны хроники устройства"}
-      </div>
-    );
-  }
-
-  if (syncing && hydratedBefore) {
-    return (
-      <div
-        role="status"
-        aria-live="polite"
-        className="fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--card-edge)] bg-[var(--card)]/85 px-3 py-1.5 text-[11px] text-[var(--ink-faint)] shadow-lg backdrop-blur"
-      >
-        <span
-          aria-hidden="true"
-          className="block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70"
-        />
-        {pendingCount > 0 ? "Отправляю хроники…" : "Сверяю хроники…"}
-      </div>
-    );
-  }
-
-  return null;
-}
-
-function pendingLabel(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} запись ждёт отправки`;
-  const word =
-    mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? "записи" : "записей";
-  return `${n} ${word} ждут отправки`;
+        </div>
+      ))}
+    </div>
+  );
 }

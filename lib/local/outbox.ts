@@ -84,7 +84,7 @@ export async function listFailedOps(): Promise<OutboxEntry[]> {
   }
 }
 
-/** rowId записей сущности, ещё не подтверждённые Башней — для меток на записях. */
+/** rowId записей сущности, ещё не подтверждённые сервером — для меток на записях. */
 export async function pendingRowIds(entity: OutboxEntity): Promise<Set<string>> {
   const db = localDb();
   if (!db) return new Set();

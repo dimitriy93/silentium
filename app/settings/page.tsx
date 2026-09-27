@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import BottomNav from "@/components/bottom-nav";
 import SignOutButton from "@/components/sign-out-button";
+import StorageSection from "@/components/storage-section";
+import SyncSection from "@/components/sync-section";
 import { formatDateRu } from "@/lib/format";
 import { getRpgProfile } from "@/lib/profile";
 import { getCurrentUser } from "@/lib/supabase/server";
@@ -9,8 +11,9 @@ import { getCurrentUser } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 /**
- * Профиль: текущее состояние RPG-каркаса (level/xp/rank) и выход.
- * Минимальный раздел — развитие персонажа будет добавлено позже.
+ * Профиль: текущее состояние RPG-каркаса (level/xp/rank), ручная
+ * синхронизация и выход. Минимальный раздел — развитие персонажа
+ * будет добавлено позже.
  */
 export default async function SettingsPage() {
   const user = await getCurrentUser();
@@ -63,6 +66,10 @@ export default async function SettingsPage() {
             аскезы начнут приносить XP.
           </p>
         </section>
+
+        <SyncSection />
+
+        <StorageSection />
 
         <SignOutButton />
       </div>

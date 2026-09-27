@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { withUserDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/supabase/server";
 import {
@@ -95,4 +95,42 @@ export async function pullSnapshot(): Promise<Action<Snapshot>> {
     dayStreak,
   };
   return { ok: true, data };
+}
+
+/**
+ * Дата последнего изменения данных пользователя на сервере — ручная
+ * синхронизация в Профиле сравнивает её с локальной (Local First).
+ * Максимум created_at/updated_at по тем же журнальным таблицам, что
+ * входят в снапшот; метрики совпадают с клиентской getLastLocalChange,
+ * поэтому после завершённой синхронизации даты равны.
+ *
+ * Epoch-миллисекунды одним запросом: drizzle возвращает сырые значения
+ * sql`` как строки в формате pg ("2026-09-27 06:14:38.860883+00"), а
+ * числовой результат не зависит от парсеров типов и часовых поясов.
+ */
+export async function getServerLastChange(): Promise<Action<{ lastChange: string | null }>> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "Требуется авторизация" };
+
+  const result = await withUserDb(user.id, async (tx) =>
+    tx.execute<{ ms: string | number | null }>(sql`
+      select extract(epoch from greatest(
+        (select max(greatest(created_at, updated_at)) from thoughts where user_id = ${user.id}),
+        (select max(created_at) from training_activities where user_id = ${user.id}),
+        (select max(greatest(created_at, updated_at)) from nutrition_entries where user_id = ${user.id}),
+        (select max(created_at) from learning_entries where user_id = ${user.id}),
+        (select max(created_at) from creation_entries where user_id = ${user.id}),
+        (select max(created_at) from leisure_entries where user_id = ${user.id}),
+        (select max(created_at) from asceticisms where user_id = ${user.id}),
+        (select max(created_at) from asceticism_logs where user_id = ${user.id}),
+        (select max(updated_at) from asceticism_streaks where user_id = ${user.id})
+      )) * 1000 as ms
+    `),
+  );
+  const rows = (result as unknown as { rows?: { ms: string | number | null }[] }).rows ?? (result as unknown as { ms: string | number | null }[]);
+  const ms = rows[0]?.ms;
+  if (ms === null || ms === undefined) return { ok: true, data: { lastChange: null } };
+  const value = Number(ms);
+  if (!Number.isFinite(value)) return { ok: true, data: { lastChange: null } };
+  return { ok: true, data: { lastChange: new Date(value).toISOString() } };
 }
