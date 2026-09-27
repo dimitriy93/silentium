@@ -1,48 +1,19 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { withUserDb } from "@/lib/db";
 import { asceticismLogs, asceticisms } from "@/lib/db/schema";
-import { ASCETICISM_MILESTONES, pluralDays } from "@/lib/asceticism-streak";
-import { DAY_STREAK_MILESTONES, firstMilestoneDate } from "@/lib/day-streak";
+import { ASCETICISM_MILESTONES, firstMilestoneDate, pluralDays } from "@/lib/asceticism-streak";
+import { DAY_STREAK_MILESTONES } from "@/lib/day-streak";
 import { dayRowsUnionSql, rowsOf } from "@/lib/day";
+import { KIND_ORDER, type ChronicleEvent } from "@/lib/chronicle-shared";
 
 /**
- * Хроника Пути: события летописи, собранные из уже существующих данных
- * (без отдельной таблицы событий):
- * - начало дневника — первый «осмысленный» день (тот же UNION, что у истории);
- * - принятие аскезы — её startDate;
- * - первая выполненная аскеза — первая отметка 'done';
- * - достижения серий аскез — даты, когда серия впервые достигла порога;
- * - рубежи серии дневника — даты, когда серия дней подряд впервые
- *   достигла порога.
- *
- * Расширение (артефакты комнаты, развитие аватара, сезонные события) —
- * новые kind'ы и новые источники в getChronicleEvents, формат события
- * { date, kind, title, subtitle } менять не потребуется.
+ * Хроника Пути — серверная сборка событий летописи (источник при пустом
+ * локальном кеше). Клиентский двойник — lib/local/chronicle.ts: тот же
+ * формат и тот же порядок событий из локальной базы. Типы и порядок событий
+ * — в lib/chronicle-shared.ts.
  */
 
-export type ChronicleKind =
-  | "journal_start"
-  | "asceticism_created"
-  | "asceticism_first_done"
-  | "asceticism_milestone"
-  | "day_streak_milestone";
-
-export interface ChronicleEvent {
-  key: string;
-  date: string;
-  kind: ChronicleKind;
-  title: string;
-  subtitle?: string;
-}
-
-/** Порядок событий с одной датой: от «начала пути» к рубежам. */
-const KIND_ORDER: ChronicleKind[] = [
-  "journal_start",
-  "asceticism_created",
-  "asceticism_first_done",
-  "asceticism_milestone",
-  "day_streak_milestone",
-];
+export type { ChronicleEvent, ChronicleKind } from "@/lib/chronicle-shared";
 
 export async function getChronicleEvents(userId: string): Promise<ChronicleEvent[]> {
   const [datesRes, ascList, logs] = await Promise.all([

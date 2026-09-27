@@ -2,6 +2,8 @@
 
 import { getDayEntries, listDaySummariesPage } from "@/lib/day";
 import { listAsceticisms } from "@/lib/asceticism";
+import { getChronicleEvents } from "@/lib/chronicle";
+import type { ChronicleEvent } from "@/lib/chronicle-shared";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { entryDateSchema, formatZodError } from "@/lib/validation";
 import type { Action } from "@/lib/types";
@@ -82,4 +84,14 @@ export async function fetchHistoryDay(date: string): Promise<Action<LocalHistory
       asceticismTitles: titles,
     },
   };
+}
+
+/**
+ * Хроника Пути как server action: серверный источник при пустом локальном
+ * кеше (первый запуск). Локальный двойник — lib/local/chronicle.ts.
+ */
+export async function fetchChronicleEvents(): Promise<Action<ChronicleEvent[]>> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "Требуется авторизация" };
+  return { ok: true, data: await getChronicleEvents(user.id) };
 }

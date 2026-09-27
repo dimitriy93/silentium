@@ -1,15 +1,10 @@
-import { redirect } from "next/navigation";
 import RegisterForm from "@/components/register-form";
-import { getCurrentUser } from "@/lib/supabase/server";
 
-export const dynamic = "force-dynamic";
-
-export default async function RegisterPage() {
-  const user = await getCurrentUser();
-  if (user) {
-    redirect("/today");
-  }
-
+/**
+ * Статическая страница регистрации. Перенаправление авторизованного
+ * пользователя выполняет middleware — серверная проверка здесь не нужна.
+ */
+export default function RegisterPage() {
   return (
     <main className="flex min-h-dvh items-center justify-center px-6">
       <div className="w-full max-w-[400px] space-y-8">

@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/supabase/server";
 
-export const dynamic = "force-dynamic";
-
-export default async function RootPage() {
-  const user = await getCurrentUser();
-  redirect(user ? "/today" : "/login");
+/**
+ * Корневой маршрут: решение принимает middleware по сессии
+ * (авторизован → «/today», нет → «/login»). Страница остаётся только
+ * как fallback для запросов в обход middleware.
+ */
+export default function RootPage() {
+  redirect("/today");
 }

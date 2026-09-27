@@ -41,6 +41,22 @@ export function computeCurrentStreak(
   return streak;
 }
 
+/**
+ * Дата, когда серия впервые достигла порога milestone (для хроники).
+ * Возвращает null, если порог не достигнут. Работает по любым датам,
+ * не только по отметкам аскез — используется и серией дневника.
+ */
+export function firstMilestoneDate(dates: string[], milestone: number): string | null {
+  let run = 0;
+  let prev: string | null = null;
+  for (const d of dates) {
+    run = prev !== null && prevDay(d) === prev ? run + 1 : 1;
+    prev = d;
+    if (run >= milestone) return d;
+  }
+  return null;
+}
+
 /** Наибольший достигнутый порог серии, 0 — порогов ещё нет. */
 export function milestoneForStreak(streak: number): number {
   let milestone = 0;

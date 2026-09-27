@@ -1,16 +1,11 @@
-import { redirect } from "next/navigation";
 import BottomNav from "@/components/bottom-nav";
 import LeisureClient from "@/components/leisure-client";
-import { getCurrentUser } from "@/lib/supabase/server";
 
-export const dynamic = "force-dynamic";
-
-export default async function LeisurePage() {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
-
+/**
+ * Статическая оболочка экрана: данные читает LeisureClient из локальной
+ * базы (IndexedDB), доступ проверяет middleware (Local First).
+ */
+export default function LeisurePage() {
   return (
     <main className="pb-32">
       <div className="mx-auto min-h-dvh w-full max-w-[480px] space-y-5 px-5 pt-[max(env(safe-area-inset-top),40px)]">

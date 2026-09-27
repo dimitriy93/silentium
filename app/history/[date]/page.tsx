@@ -1,28 +1,19 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import BottomNav from "@/components/bottom-nav";
 import HistoryDayClient from "@/components/history-day-client";
 import { formatDateRu, formatWeekdayRu } from "@/lib/format";
-import { getCurrentUser } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
 
 /**
- * Страница одного дня истории: все записи разделов этого дня. Данные читает
- * клиентский HistoryDayClient — мгновенно из локального кеша, при пустом
- * кеше — серверным экшеном fetchHistoryDay. Только чтение — редактирование
- * выполняется в соответствующих разделах.
+ * Статическая оболочка страницы одного дня истории: все записи читает
+ * клиентский HistoryDayClient из локального кеша, доступ проверяет
+ * middleware. Анализ даты локален (без I/O), поэтому рендер мгновенный.
  */
 export default async function HistoryDayPage({
   params,
 }: {
   params: Promise<{ date: string }>;
 }) {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
-
   const { date } = await params;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     notFound();

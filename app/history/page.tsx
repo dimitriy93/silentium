@@ -1,23 +1,15 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import BottomNav from "@/components/bottom-nav";
 import HistoryClient from "@/components/history-client";
-import { getCurrentUser } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
 
 /**
- * История: список дней с активностью, новые сверху. Данные экрана собирает
- * клиентский HistoryClient — мгновенно из локального кеша (IndexedDB), при
- * пустом кеше — серверным экшеном fetchHistoryPage (пагинация ?page=N).
+ * Статическая оболочка экрана: список дней собирает клиентский HistoryClient
+ * из локального кеша (IndexedDB), доступ проверяет middleware. Suspense
+ * удержан: HistoryClient использует useSearchParams, статическому рендеру
+ * нужна граница. Данных на сервере нет — fallback пустой (Local First).
  */
-export default async function HistoryPage() {
-  const user = await getCurrentUser();
-  if (!user) {
-    redirect("/login");
-  }
-
+export default function HistoryPage() {
   return (
     <main className="pb-32">
       <div className="mx-auto min-h-dvh w-full max-w-[480px] space-y-5 px-5 pt-[max(env(safe-area-inset-top),40px)]">
@@ -32,17 +24,11 @@ export default async function HistoryPage() {
           </Link>
         </div>
 
-        <Suspense fallback={<OrbitalLoaderFallback />}>
+        <Suspense fallback={null}>
           <HistoryClient />
         </Suspense>
       </div>
       <BottomNav />
     </main>
-  );
-}
-
-function OrbitalLoaderFallback() {
-  return (
-    <p className="py-8 text-center text-sm text-[var(--ink-faint)]">Читаю хронику…</p>
   );
 }

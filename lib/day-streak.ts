@@ -7,7 +7,6 @@ import {
   prevDay,
 } from "@/lib/asceticism-streak";
 import { dayRowsUnionSql, rowsOf } from "@/lib/day";
-
 /**
  * Серия ведения дневника (Day Streak).
  *
@@ -52,16 +51,7 @@ export function longestStreakFromDates(dates: string[]): number {
  * Дата, когда серия впервые достигла порога milestone (для хроники).
  * Возвращает null, если порог не достигнут.
  */
-export function firstMilestoneDate(dates: string[], milestone: number): string | null {
-  let run = 0;
-  let prev: string | null = null;
-  for (const d of dates) {
-    run = prev !== null && prevDay(d) === prev ? run + 1 : 1;
-    prev = d;
-    if (run >= milestone) return d;
-  }
-  return null;
-}
+export { firstMilestoneDate } from "@/lib/asceticism-streak";
 
 /**
  * Пересчитать и сохранить серию дневника. Якорь — дата, в которую случилось
