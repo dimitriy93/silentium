@@ -1,18 +1,18 @@
 /**
  * Характеристики персонажа — общий чистый модуль (без рантайм-зависимостей).
  *
- * Четыре характеристики (Тело, Разум, Созидание, Дисциплина) НЕ хранятся:
- * они вычисляются из XP-событий. Каждая характеристика копит свой XP и
- * проходит уровни по той же формуле, что и общий уровень (lib/xp.ts).
+ * Пять характеристик (Тело, Разум, Созидание, Дисциплина, Питание) НЕ
+ * хранятся: они вычисляются из XP-событий. Каждая характеристика копит свой
+ * XP и проходит уровни по той же формуле, что и общий уровень (lib/xp.ts).
  *
  * Раздел события определяется типом и описанием: у событий «path»
- * (тренировки, обучение, созидание) sourceId — id записи без префикса
- * раздела, поэтому единственный стабильный признак — description из
- * XP_DESCRIPTIONS (lib/xp.ts, строки записываются при начислении).
+ * (тренировки, питание, обучение, созидание) sourceId — id записи без
+ * префикса раздела, поэтому единственный стабильный признак — description
+ * из XP_DESCRIPTIONS (lib/xp.ts, строки записываются при начислении).
  */
 import { XP_DESCRIPTIONS, levelProgress } from "@/lib/xp";
 
-export type CharacterKey = "body" | "mind" | "creation" | "discipline";
+export type CharacterKey = "body" | "mind" | "creation" | "discipline" | "nutrition";
 
 /** Порядок характеристик в интерфейсе. */
 export const CHARACTERISTICS: readonly { key: CharacterKey; title: string }[] = [
@@ -20,6 +20,7 @@ export const CHARACTERISTICS: readonly { key: CharacterKey; title: string }[] = 
   { key: "mind", title: "Разум" },
   { key: "creation", title: "Созидание" },
   { key: "discipline", title: "Дисциплина" },
+  { key: "nutrition", title: "Питание" },
 ];
 
 const CHARACTERISTIC_TITLES: Record<CharacterKey, string> = {
@@ -27,12 +28,14 @@ const CHARACTERISTIC_TITLES: Record<CharacterKey, string> = {
   mind: "Разум",
   creation: "Созидание",
   discipline: "Дисциплина",
+  nutrition: "Питание",
 };
 
 /**
  * Раздел XP-события или null (событие не относится ни к одной характеристике).
- * Тело — тренировки и питание; Разум — мысли и обучение; Созидание — записи
- * создания; Дисциплина — аскезы, дневные бонусы и серии дней.
+ * Тело — тренировки; Питание — записи питания; Разум — мысли и обучение;
+ * Созидание — записи создания; Дисциплина — аскезы, дневные бонусы и серии
+ * дней.
  */
 export function characteristicOfXpEvent(event: {
   type: string;
@@ -47,7 +50,7 @@ export function characteristicOfXpEvent(event: {
       return "discipline";
     case "path":
       if (event.sourceId.startsWith("nutrition:") || event.description === XP_DESCRIPTIONS.nutrition) {
-        return "body";
+        return "nutrition";
       }
       if (event.description === XP_DESCRIPTIONS.training) return "body";
       if (event.description === XP_DESCRIPTIONS.learning) return "mind";
@@ -62,7 +65,13 @@ export function characteristicOfXpEvent(event: {
 export function sumCharacterXp(
   events: Iterable<{ type: string; description: string; sourceId: string; amount: number }>,
 ): Record<CharacterKey, number> {
-  const xp: Record<CharacterKey, number> = { body: 0, mind: 0, creation: 0, discipline: 0 };
+  const xp: Record<CharacterKey, number> = {
+    body: 0,
+    mind: 0,
+    creation: 0,
+    discipline: 0,
+    nutrition: 0,
+  };
   for (const event of events) {
     const key = characteristicOfXpEvent(event);
     if (key) xp[key] += event.amount;

@@ -77,11 +77,11 @@ export default function TodayClient() {
         </p>
       </header>
 
-      <CharacterCard />
-
       <DayStreakCard streak={dayStreak} />
 
       <AvatarRoom path={path} asceticism={asceticism} />
+
+      <CharacterCard />
 
       <AchievementsCard achievements={achievements} dayStreak={dayStreak} />
 
@@ -123,7 +123,7 @@ function Empty({ text }: { text: string }) {
 // ---------- Серия дневника ----------
 
 /**
- * Карточка серии ведения дневника: между датой и комнатой аватара.
+ * Карточка серии ведения дневника: первый блок после даты.
  * Активная серия — золотая, отсутствующая — серая с подсказкой.
  * Декор: бронзовые уголки и тонкий орнамент-разделитель.
  */

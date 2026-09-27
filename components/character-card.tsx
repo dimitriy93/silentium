@@ -3,6 +3,7 @@
 import { useCacheQuery } from "@/hooks/use-cache-query";
 import { readCharacterView, type CharacterView } from "@/lib/local/character";
 import { getRankTitle } from "@/lib/ranks";
+import CharacterRadar from "@/components/character-radar";
 import OrbitalLoader from "@/components/orbital-loader";
 
 /**
@@ -74,21 +75,10 @@ function CharacterCardBody({ view }: { view: CharacterView }) {
         <span className="engraved-line flex-1" />
       </div>
 
-      {/* Характеристики — уровни вычисляются из XP-событий */}
-      <ul className="mt-3 grid grid-cols-2 gap-2">
-        {view.characteristics.map((c) => (
-          <li
-            key={c.key}
-            className="rounded-2xl border border-[var(--card-edge)] px-3 py-2 text-center"
-          >
-            <p className="text-xs text-[var(--ink-secondary)]">{c.title}</p>
-            <p className="font-chronicle text-lg font-bold leading-tight text-[var(--gold)]">
-              {c.level}
-            </p>
-            <p className="text-[10px] text-[var(--ink-faint)]">{formatNumber(c.xp)} XP</p>
-          </li>
-        ))}
-      </ul>
+      {/* Характеристики — пятиугольник из XP-событий */}
+      <div className="mt-2">
+        <CharacterRadar characteristics={view.characteristics} />
+      </div>
     </section>
   );
 }
