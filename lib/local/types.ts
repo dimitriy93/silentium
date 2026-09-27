@@ -96,6 +96,35 @@ export interface LocalHistoryPage {
   totalDays: number;
 }
 
+// ---------- Опыт (XP) ----------
+
+/** Тип источника опыта. */
+export type XpEventType = "path" | "asceticism" | "thought" | "day";
+
+/**
+ * Событие начисления опыта. id — клиентский UUID (стабилен для синхронизации),
+ * sourceId — якорь исходного действия для защиты от повторного начисления
+ * (id записи; для дневных/аскетичных бонусов — составной ключ «тип:дата»).
+ */
+export interface LocalXpEvent {
+  id: string;
+  userId: string;
+  /** Локальная дата действия (для дневных бонусов и серверной группировки). */
+  entryDate: string | null;
+  type: XpEventType;
+  amount: number;
+  description: string;
+  sourceId: string;
+  createdAt: string;
+}
+
+/** Локальный агрегат опыта: кэш суммы событий; истина — сумма xpEvents. */
+export interface LocalXpProfile {
+  userId: string;
+  totalXP: number;
+  updatedAt: string;
+}
+
 /**
  * Полный снапшот журнальных таблиц пользователя (этап 1 — read-only:
  * записи по-прежнему идут через Server Actions, кеш только читает).
@@ -112,6 +141,7 @@ export interface Snapshot {
   asceticisms: LocalAsceticism[];
   asceticismLogs: LocalAsceticismLog[];
   asceticismStreaks: LocalAsceticismStreak[];
+  xpEvents: LocalXpEvent[];
   dayStreak: DayStreakView | null;
 }
 

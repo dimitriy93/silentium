@@ -227,6 +227,19 @@ export async function applyOpToCache(
       }
       return;
     }
+
+    case "xpEvent": {
+      // Создание XP-события: строка пишется as-is (payload — полное событие).
+      // Операции с таким rowId сервер подтверждает по PK, повтор безопасен.
+      // Агрегат xpProfile здесь НЕ трогается: при мутации его увеличивает
+      // awardXpInTx, после снапшота агрегат пересчитывается из событий.
+      if (entry.op === "create") {
+        await db.xpEvents.put({ ...v, id: entry.rowId, userId } as Parameters<
+          typeof db.xpEvents.put
+        >[0]);
+      }
+      return;
+    }
   }
 }
 

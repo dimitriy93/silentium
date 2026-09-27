@@ -13,6 +13,7 @@ import {
   subscribeOutbox,
 } from "@/lib/local/outbox";
 import { writeSnapshot } from "@/lib/local/writes";
+import XpToaster from "@/components/xp-toaster";
 import type { OutboxEntity } from "@/lib/local/outbox-types";
 
 /**
@@ -193,6 +194,7 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
         </div>
       ) : null}
       <FailedOpsPanel failedOps={failedOps} onRetry={retryFailed} onDiscard={discardFailed} />
+      <XpToaster />
     </SyncContext.Provider>
   );
 }
@@ -206,6 +208,7 @@ const ENTITY_LABELS: Record<OutboxEntity, string> = {
   leisure: "Развлечение",
   asceticism: "Аскеза",
   asceticismLog: "Отметка аскезы",
+  xpEvent: "Опыт",
 };
 
 interface PanelProps {

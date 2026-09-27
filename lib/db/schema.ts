@@ -39,9 +39,12 @@ export const profiles = pgTable("profiles", {
 });
 
 /**
- * RPG-профиль: будущий уровень/опыт/ранг персонажа.
- * Логика начисления XP на этом этапе НЕ реализована — только сущность
- * и начальные значения (level = 1, xp = 0). Создаётся тем же триггером.
+ * RPG-профиль: агрегат опыта пользователя. xp — ОБЩИЙ накопительный XP
+ * (сумма xp_events), level вычисляется из xp формулой lib/xp.ts
+ * (requiredXp(level) = floor(100 × level^1.6)) и хранится как кэш.
+ * Обновляется только при ручной синхронизации после новых XP-событий.
+ * rank — наследие прежнего каркаса, системой опыта не используется.
+ * Строка создаётся триггером при регистрации.
  */
 export const rpgProfiles = pgTable(
   "rpg_profiles",
@@ -56,9 +59,13 @@ export const rpgProfiles = pgTable(
 );
 
 /**
- * События начисления опыта — архитектурная подготовка будущей системы XP
- * («записал мысль → +2 XP» и т.п.). Приложение пока ничего сюда не пишет;
- * таблица готова для последующего включения логики.
+ * События начисления опыта. Пишутся только через ручную синхронизацию
+ * (pushOutbox, entity "xpEvent"): клиент создаёт событие локально в момент
+ * действия и отправляет его в очереди. Идемпотентность: PK = клиентский UUID
+ * события плюс unique (user_id, source_id) — якорь исходного действия;
+ * повторный push существующего события не меняет данные (onConflictDoNothing).
+ * Общий XP пользователя — сумма xp по всем событиям (пересчитывается в
+ * rpg_profiles после каждого нового события).
  */
 export const xpEvents = pgTable(
   "xp_events",
@@ -66,13 +73,17 @@ export const xpEvents = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").notNull(),
     entryDate: date("entry_date"),
-    /** Источник опыта, например 'thought_created' | 'path_filled' | 'asceticism_done'. */
+    /** Тип источника: 'path' | 'asceticism' | 'thought' | 'day'. */
     source: text("source").notNull(),
+    /** Якорь исходного действия (id записи или составной ключ «тип:дата»). */
+    sourceId: text("source_id"),
+    description: text("description"),
     xp: integer("xp").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("xp_events_user_date_idx").on(t.userId, t.entryDate),
+    unique("xp_events_user_source_unique").on(t.userId, t.sourceId),
     check("xp_events_xp_check", sql`${t.xp} <> 0`),
   ],
 );

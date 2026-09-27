@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
+import { withUserDb } from "@/lib/db";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { rpgProfiles, xpEvents } from "@/lib/db/schema";
 import {
   createThought as dbCreateThought,
   deleteThought as dbDeleteThought,
@@ -30,6 +33,7 @@ import {
 } from "@/lib/asceticism";
 import { syncDayStreak } from "@/lib/day-streak";
 import { clampToNow, todayLocalDate } from "@/lib/format";
+import { levelFromTotal } from "@/lib/xp";
 import { entryDateSchema, formatZodError, nonEmptyText, uuidSchema } from "@/lib/validation";
 import type { Action } from "@/lib/types";
 import type { OutboxEntity, OutboxOp, OutboxOpType, PushOpResult } from "@/lib/local/outbox-types";
@@ -131,6 +135,16 @@ const logUpsertSchema = z.object({
   status: z.enum(["done", "failed", "none"]),
 });
 
+const xpEventCreateSchema = z.object({
+  id: uuidSchema,
+  entryDate: entryDateSchema.nullish(),
+  type: z.enum(["path", "asceticism", "thought", "day"]),
+  amount: z.number().int().positive().max(10_000),
+  description: z.string().trim().max(200).nullish().transform((v) => v || null),
+  sourceId: z.string().trim().min(1).max(200),
+  createdAt: isoTimestamp,
+});
+
 const envelopeSchema = z.object({
   opId: uuidSchema,
   userId: uuidSchema,
@@ -143,6 +157,7 @@ const envelopeSchema = z.object({
     "leisure",
     "asceticism",
     "asceticismLog",
+    "xpEvent",
   ]),
   op: z.enum(["create", "update", "delete", "upsert"]),
   rowId: uuidSchema,
@@ -150,13 +165,14 @@ const envelopeSchema = z.object({
   createdAt: z.string(),
 });
 
-/** Порядок: thought → path-сущности → leisure → asceticism. */
+/** Порядок: thought → path-сущности → leisure → asceticism → xp. */
 function markPaths(paths: Set<string>, entity: OutboxEntity): void {
   paths.add("/today");
   paths.add("/history");
   if (entity === "thought") paths.add("/thoughts");
   else if (entity === "leisure") paths.add("/leisure");
   else if (entity === "asceticism" || entity === "asceticismLog") paths.add("/asceticism");
+  else if (entity === "xpEvent") return; // XP читается клиентом из локальной базы
   else paths.add("/path");
 }
 
@@ -358,9 +374,61 @@ async function applyOne(
       return { ok: true };
     }
 
+    case "xpEvent:create": {
+      const p = xpEventCreateSchema.safeParse(payload);
+      if (!p.success) return { ok: false, error: formatZodError(p.error) };
+      // Идемпотентность без реестра opId: PK = клиентский UUID события,
+      // плюс unique (user_id, source_id) — якорь действия. Повторный push
+      // существующего события (обрыв после применения, вторая вкладка)
+      // не меняет данные — конфликт игнорируется целиком.
+      await withUserDb(userId, (tx) =>
+        tx
+          .insert(xpEvents)
+          .values({
+            id: p.data.id,
+            userId,
+            entryDate: p.data.entryDate ?? null,
+            source: p.data.type,
+            sourceId: p.data.sourceId,
+            description: p.data.description,
+            xp: p.data.amount,
+            createdAt: new Date(p.data.createdAt),
+          })
+          .onConflictDoNothing(),
+      );
+      // Агрегат пересчитывается из событий (а не += localTotal): идемпотентно,
+      // самовосстанавливается после обрыва между insert и обновлением и
+      // корректно сходится при синхронизации нескольких устройств.
+      await recountRpgXp(userId);
+      return { ok: true };
+    }
+
     default:
       return { ok: false, error: "Неизвестный тип операции" };
   }
+}
+
+/**
+ * Пересчитать rpg_profiles из xp_events: xp = сумма всех событий, level —
+ * из формулы lib/xp.ts (кэш; истина — xp). Идемпотентно и для повторов,
+ * и для событий, пришедших с других устройств.
+ */
+async function recountRpgXp(userId: string): Promise<void> {
+  await withUserDb(userId, async (tx) => {
+    const result = await tx.execute<{ total: string | number | null }>(sql`
+      select coalesce(sum(xp), 0) as total from xp_events where user_id = ${userId}
+    `);
+    const rows = (result as unknown as { rows?: { total: string | number | null }[] }).rows ??
+      (result as unknown as { total: string | number | null }[]);
+    const total = Number(rows[0]?.total ?? 0);
+    await tx
+      .insert(rpgProfiles)
+      .values({ userId, xp: total, level: levelFromTotal(total), updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: rpgProfiles.userId,
+        set: { xp: total, level: levelFromTotal(total), updatedAt: new Date() },
+      });
+  });
 }
 
 /**

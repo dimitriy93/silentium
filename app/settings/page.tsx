@@ -4,24 +4,21 @@ import BottomNav from "@/components/bottom-nav";
 import SignOutButton from "@/components/sign-out-button";
 import StorageSection from "@/components/storage-section";
 import SyncSection from "@/components/sync-section";
+import XpProfileSection from "@/components/xp-profile-section";
 import { formatDateRu } from "@/lib/format";
-import { getRpgProfile } from "@/lib/profile";
 import { getCurrentUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Профиль: текущее состояние RPG-каркаса (level/xp/rank), ручная
- * синхронизация и выход. Минимальный раздел — развитие персонажа
- * будет добавлено позже.
+ * Профиль: аккаунт, локальный опыт и уровень (сервер не запрашивается —
+ * всё из IndexedDB), ручная синхронизация и выход.
  */
 export default async function SettingsPage() {
   const user = await getCurrentUser();
   if (!user) {
     redirect("/login");
   }
-
-  const profile = await getRpgProfile(user.id);
 
   return (
     <main className="pb-32">
@@ -43,29 +40,7 @@ export default async function SettingsPage() {
           </p>
         </section>
 
-        <section className="bronze-card bronze-edge p-4">
-          <h2 className="font-chronicle mb-3 text-base font-semibold text-[var(--gold)]">
-            Персонаж
-          </h2>
-          <ul className="space-y-1.5 text-[15px]">
-            <li className="flex justify-between">
-              <span className="text-[var(--ink-secondary)]">Уровень</span>
-              <span>{profile?.level ?? 1}</span>
-            </li>
-            <li className="flex justify-between">
-              <span className="text-[var(--ink-secondary)]">Опыт</span>
-              <span>{profile?.xp ?? 0} XP</span>
-            </li>
-            <li className="flex justify-between">
-              <span className="text-[var(--ink-secondary)]">Ранг</span>
-              <span className="capitalize">{profile?.rank ?? "novice"}</span>
-            </li>
-          </ul>
-          <p className="mt-3 text-xs leading-relaxed text-[var(--ink-faint)]">
-            Система опыта и рангов будет развиваться позже: записи и выполненные
-            аскезы начнут приносить XP.
-          </p>
-        </section>
+        <XpProfileSection />
 
         <SyncSection />
 

@@ -16,7 +16,8 @@ export type OutboxEntity =
   | "creation"
   | "leisure"
   | "asceticism"
-  | "asceticismLog";
+  | "asceticismLog"
+  | "xpEvent";
 
 export type OutboxOpType = "create" | "update" | "delete" | "upsert";
 

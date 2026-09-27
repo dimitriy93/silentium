@@ -12,6 +12,8 @@ import type {
   LocalNutrition,
   LocalThought,
   LocalTraining,
+  LocalXpEvent,
+  LocalXpProfile,
 } from "@/lib/local/types";
 
 /**
@@ -23,7 +25,8 @@ import type {
  *
  * Схема версионируется: будущие изменения — новые this.version(n) с
  * апгрейдами. Версия 2 добавила таблицу outbox, версия 3 — изображения
- * (бинарные blob'ы, переживают перезагрузку и работают без сети).
+ * (бинарные blob'ы, переживают перезагрузку и работают без сети),
+ * версия 4 — XP-события и агрегат опыта.
  */
 class SilentiumLocalDb extends Dexie {
   thoughts!: Table<LocalThought, string>;
@@ -44,6 +47,10 @@ class SilentiumLocalDb extends Dexie {
   outbox!: Table<OutboxEntry, number>;
   /** Локальные изображения: blob по символьному ключу. */
   images!: Table<StoredImage, string>;
+  /** События начисления опыта (свои + пришедшие со снапшотом). */
+  xpEvents!: Table<LocalXpEvent, string>;
+  /** Агрегат опыта (кэш суммы событий): одна строка, key = userId. */
+  xpProfile!: Table<LocalXpProfile, string>;
 
   constructor() {
     super("silentium");
@@ -67,6 +74,12 @@ class SilentiumLocalDb extends Dexie {
     // v3: локальные изображения (IndexedDB), апгрейд пустой.
     this.version(3).stores({
       images: "key",
+    });
+    // v4: XP-события и кэш-агрегат опыта, апгрейд пустой. sourceId — якорь
+    // защиты от повторного начисления; createdAt — сортировка «последних».
+    this.version(4).stores({
+      xpEvents: "id, userId, sourceId, type, createdAt",
+      xpProfile: "userId",
     });
   }
 }
@@ -113,7 +126,10 @@ export function localDb(): SilentiumLocalDb | null {
   return instance;
 }
 
-/** Все журнальные таблицы одним списком — для транзакций снапшота. */
+/** Все журнальные таблицы одним списком — для транзакций снапшота.
+ * Включая XP-события: они участвуют в сравнении дат синхронизации (createdAt)
+ * и очищаются при смене пользователя, как остальные журналы. Агрегат
+ * xpProfile сюда не входит — он кэш, восстанавливаемый из событий. */
 export function journalTables(db: SilentiumLocalDb): Table<unknown, string>[] {
   return [
     db.thoughts,
@@ -125,6 +141,7 @@ export function journalTables(db: SilentiumLocalDb): Table<unknown, string>[] {
     db.asceticisms,
     db.asceticismLogs,
     db.asceticismStreaks,
+    db.xpEvents,
     db.dayStreak,
   ] as unknown as Table<unknown, string>[];
 }

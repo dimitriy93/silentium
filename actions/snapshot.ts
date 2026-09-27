@@ -11,6 +11,7 @@ import {
   nutritionEntries,
   thoughts,
   trainingActivities,
+  xpEvents,
 } from "@/lib/db/schema";
 import { ensureAsceticismStreaks, listAsceticisms } from "@/lib/asceticism";
 import { getDayStreakView } from "@/lib/day-streak";
@@ -26,6 +27,7 @@ import type {
   LocalNutrition,
   LocalThought,
   LocalTraining,
+  LocalXpEvent,
   Snapshot,
 } from "@/lib/local/types";
 
@@ -54,7 +56,7 @@ export async function pullSnapshot(): Promise<Action<Snapshot>> {
   if (!user) return { ok: false, error: "Требуется авторизация" };
 
   const today = todayLocalDate();
-  const [thoughtRows, trainingRows, nutritionRows, learningRows, creationRows, leisureRows, ascList, logRows, streakRows, dayStreak] =
+  const [thoughtRows, trainingRows, nutritionRows, learningRows, creationRows, leisureRows, ascList, logRows, streakRows, xpEventRows, dayStreak] =
     await Promise.all([
       withUserDb(user.id, (tx) => tx.select().from(thoughts).where(eq(thoughts.userId, user.id))),
       withUserDb(user.id, (tx) =>
@@ -77,6 +79,9 @@ export async function pullSnapshot(): Promise<Action<Snapshot>> {
         tx.select().from(asceticismLogs).where(eq(asceticismLogs.userId, user.id)),
       ),
       ensureAsceticismStreaks(user.id, today),
+      withUserDb(user.id, (tx) =>
+        tx.select().from(xpEvents).where(eq(xpEvents.userId, user.id)),
+      ),
       getDayStreakView(user.id, today),
     ]);
 
@@ -92,6 +97,16 @@ export async function pullSnapshot(): Promise<Action<Snapshot>> {
     asceticisms: ascList.map(toIsoRow) as unknown as LocalAsceticism[],
     asceticismLogs: logRows.map(toIsoRow) as unknown as LocalAsceticismLog[],
     asceticismStreaks: streakRows.map(toIsoRow) as unknown as LocalAsceticismStreak[],
+    xpEvents: xpEventRows.map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      entryDate: row.entryDate,
+      type: row.source as LocalXpEvent["type"],
+      amount: row.xp,
+      description: row.description ?? "",
+      sourceId: row.sourceId ?? "",
+      createdAt: toIsoValue(row.createdAt),
+    })),
     dayStreak,
   };
   return { ok: true, data };
@@ -123,7 +138,8 @@ export async function getServerLastChange(): Promise<Action<{ lastChange: string
         (select max(created_at) from leisure_entries where user_id = ${user.id}),
         (select max(created_at) from asceticisms where user_id = ${user.id}),
         (select max(created_at) from asceticism_logs where user_id = ${user.id}),
-        (select max(updated_at) from asceticism_streaks where user_id = ${user.id})
+        (select max(updated_at) from asceticism_streaks where user_id = ${user.id}),
+        (select max(created_at) from xp_events where user_id = ${user.id})
       )) * 1000 as ms
     `),
   );

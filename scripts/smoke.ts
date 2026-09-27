@@ -292,6 +292,34 @@ async function main() {
       backfillStreak?.currentStreak === 0 && backfillStreak.bestMilestone === 3,
     );
 
+    // XP-события: идемпотентный приём (как pushOutbox) и агрегат.
+    const xpId = randomUUID();
+    const xpInsert = (overrides: Partial<typeof schema.xpEvents.$inferInsert> = {}) =>
+      withUserDb(userId, (tx) =>
+        tx
+          .insert(schema.xpEvents)
+          .values({
+            id: xpId,
+            userId,
+            entryDate: date,
+            source: "path",
+            sourceId: `smoke:training:${xpId}`,
+            description: "Тренировка",
+            xp: 10,
+            createdAt: new Date(),
+            ...overrides,
+          })
+          .onConflictDoNothing(),
+      );
+    await xpInsert();
+    await xpInsert(); // повторный push того же события (обрыв, вторая вкладка)
+    await xpInsert({ id: randomUUID() }); // тот же sourceId, другой id — конфликт игнорируется
+    const [xpCount] = await admin`select count(*)::int as n from xp_events where user_id = ${userId}`;
+    check("XP: повторный push события не дублирует", xpCount?.n === 1);
+    await xpInsert({ id: randomUUID(), sourceId: `smoke:asceticism:${xpId}`, source: "asceticism", xp: 15, description: "Аскеза" });
+    const [xpAgg] = await admin`select coalesce(sum(xp), 0)::int as total from xp_events where user_id = ${userId}`;
+    check("XP: агрегат = сумма событий (25)", xpAgg?.total === 25);
+
     // День / история.
     const dayEntries = await getDayEntries(userId, date);
     check(

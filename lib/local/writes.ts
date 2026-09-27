@@ -34,6 +34,7 @@ import type {
   Snapshot,
   Wire,
 } from "@/lib/local/types";
+import { recomputeXpProfile } from "@/lib/local/xp";
 
 /**
  * Запись в локальный кеш. Две группы операций:
@@ -67,6 +68,9 @@ async function clearJournal(db: NonNullable<ReturnType<typeof localDb>>): Promis
   for (const table of journalTables(db)) {
     await table.clear();
   }
+  // Агрегат опыта не входит в журнальные таблицы (не участвует в сравнении
+  // дат синхронизации), но при смене пользователя чужой кэш тоже чужой.
+  await db.xpProfile.clear();
 }
 
 /** Полная замена кеша снапшотом + оверлей pending-операций — одна транзакция. */
@@ -86,6 +90,8 @@ export async function writeSnapshot(snapshot: Snapshot): Promise<boolean> {
         db.asceticisms,
         db.asceticismLogs,
         db.asceticismStreaks,
+        db.xpEvents,
+        db.xpProfile,
         db.dayStreak,
         db.meta,
         db.outbox,
@@ -108,6 +114,7 @@ export async function writeSnapshot(snapshot: Snapshot): Promise<boolean> {
           db.asceticisms.clear(),
           db.asceticismLogs.clear(),
           db.asceticismStreaks.clear(),
+          db.xpEvents.clear(),
           db.dayStreak.clear(),
         ]);
         await Promise.all([
@@ -120,6 +127,7 @@ export async function writeSnapshot(snapshot: Snapshot): Promise<boolean> {
           db.asceticisms.bulkPut(snapshot.asceticisms),
           db.asceticismLogs.bulkPut(snapshot.asceticismLogs),
           db.asceticismStreaks.bulkPut(snapshot.asceticismStreaks),
+          db.xpEvents.bulkPut(snapshot.xpEvents ?? []),
           snapshot.dayStreak
             ? db.dayStreak.put({ key: DAY_STREAK_KEY, view: snapshot.dayStreak })
             : Promise.resolve(),
@@ -127,6 +135,9 @@ export async function writeSnapshot(snapshot: Snapshot): Promise<boolean> {
         // ОВЕРЛЕЙ: операции очереди (pending/sending/failed) переписывают
         // свои строки поверх снапшота, пока push их не подтвердил.
         await applyOutboxOverlay(db);
+        // Агрегат опыта — кэш: после снапшота пересчитывается из событий
+        // (серверные + оверлей pending), расхождение исключено.
+        await recomputeXpProfile(db, snapshot.userId);
         await db.meta.put({
           key: SNAPSHOT_META_KEY,
           userId: snapshot.userId,
