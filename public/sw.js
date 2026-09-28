@@ -14,7 +14,7 @@
  * Версия кеша: при деплое менять CACHE_VERSION (устаревшие payload'ы другого
  * билда не должны переживать деплой).
  */
-const CACHE_VERSION = "silentium-static-v2";
+const CACHE_VERSION = "silentium-static-v3";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGES_CACHE = `${CACHE_VERSION}-pages`;
 const RSC_CACHE = `${CACHE_VERSION}-rsc`;
@@ -43,6 +43,10 @@ const TABS = [
   "history/",
   "chronicle/",
   "leisure/",
+  // Публичные юридические страницы: должны открываться офлайн сразу
+  // (Google и пользователи могут открыть их без посещения приложения).
+  "privacy/",
+  "terms/",
 ];
 
 /** URL без временного параметра _rsc — ключ RSC-кеша. */

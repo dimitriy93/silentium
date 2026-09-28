@@ -9,6 +9,7 @@ import {
 } from "@/lib/local/backup";
 import {
   connectDrive,
+  deleteCloudBackup,
   disconnectDrive,
   downloadCloudBackupJson,
   formatSyncTime,
@@ -29,7 +30,8 @@ type Phase =
   | { kind: "idle" }
   | { kind: "busy"; label: string }
   | { kind: "message"; text: string; tone: "ok" | "error" }
-  | { kind: "confirmRestore"; backup: ParsedBackup };
+  | { kind: "confirmRestore"; backup: ParsedBackup }
+  | { kind: "confirmDelete" };
 
 export default function CloudSyncSection() {
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -119,6 +121,20 @@ export default function CloudSyncSection() {
     setPhase({ kind: "message", text: "Google Drive отключён. Копия в Drive осталась на месте.", tone: "ok" });
   }
 
+  async function handleDeleteConfirm() {
+    setPhase({ kind: "busy", label: "Удаляю копию из Drive…" });
+    try {
+      await deleteCloudBackup();
+      setPhase({ kind: "message", text: "Копия удалена из Google Drive. Локальные данные не изменены.", tone: "ok" });
+    } catch (error) {
+      setPhase({
+        kind: "message",
+        text: error instanceof Error ? error.message : "Не удалось удалить копию из Google Drive.",
+        tone: "error",
+      });
+    }
+  }
+
   const busy = phase.kind === "busy";
 
   return (
@@ -191,6 +207,36 @@ export default function CloudSyncSection() {
                 </button>
               </div>
             </div>
+          ) : phase.kind === "confirmDelete" ? (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-[var(--card-edge)] bg-[var(--pill-active)] p-3">
+                <p className="text-sm font-semibold text-[var(--gold)]">
+                  Удаление облачной копии
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--ink-secondary)]">
+                  Файл резервной копии будет удалён из скрытой папки приложения
+                  в Google Drive. Локальные данные останутся без изменений.
+                  Это действие нельзя отменить.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="btn-bronze h-11 flex-1 text-sm"
+                  disabled={busy}
+                  onClick={() => void handleDeleteConfirm()}
+                >
+                  Удалить копию
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost h-11 flex-1 text-sm"
+                  onClick={() => setPhase({ kind: "idle" })}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="space-y-2.5">
               <button
@@ -208,6 +254,14 @@ export default function CloudSyncSection() {
                 onClick={() => void handleRestoreStart()}
               >
                 Восстановить из Google Drive
+              </button>
+              <button
+                type="button"
+                className="btn-ghost h-11 w-full text-sm"
+                disabled={busy}
+                onClick={() => setPhase({ kind: "confirmDelete" })}
+              >
+                Удалить копию в Google Drive
               </button>
               <button
                 type="button"

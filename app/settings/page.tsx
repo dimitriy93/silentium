@@ -3,6 +3,7 @@ import BottomNav from "@/components/bottom-nav";
 import BackupSection from "@/components/backup-section";
 import CloudSyncSection from "@/components/cloud-sync-section";
 import StorageSection from "@/components/storage-section";
+import AboutSection from "@/components/about-section";
 import XpProfileSection from "@/components/xp-profile-section";
 import PathStatsSection from "@/components/path-stats-section";
 
@@ -31,6 +32,8 @@ export default function SettingsPage() {
         <CloudSyncSection />
 
         <StorageSection />
+
+        <AboutSection />
       </div>
       <BottomNav />
     </main>

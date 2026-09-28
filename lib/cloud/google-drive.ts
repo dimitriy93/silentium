@@ -311,6 +311,26 @@ export async function downloadCloudBackupJson(): Promise<string> {
   return response.text();
 }
 
+/**
+ * Удалить резервную копию из Google Drive. Локальные данные и флаг
+ * подключения не затрагиваются: после удаления можно снова синхронизировать.
+ */
+export async function deleteCloudBackup(): Promise<void> {
+  const { token } = await requireToken();
+  const file = await findBackupFile(token);
+  if (!file) {
+    throw new Error("В Google Drive нет резервной копии Silentium");
+  }
+  const response = await driveFetch(
+    `${DRIVE_API}/files/${encodeURIComponent(file.id)}`,
+    token,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw new Error(`Не удалось удалить резервную копию из Google Drive (${response.status})`);
+  }
+}
+
 /** Форматирование timestamp синхронизации: «28.09.2026, 09:42». */
 export function formatSyncTime(iso: string): string {
   const date = new Date(iso);
