@@ -233,11 +233,12 @@ async function findBackupFile(token: string): Promise<DriveFile | null> {
 /** Multipart upload: метаданные файла + содержимое backup. */
 async function uploadBackup(token: string, json: string, fileId: string | null): Promise<void> {
   const boundary = "silentium-backup-boundary";
-  const metadata = {
-    name: BACKUP_FILE_NAME,
-    parents: ["appDataFolder"],
-    mimeType: "application/json",
-  };
+  // parents пишется только при создании файла (POST): Drive API запрещает
+  // поле parents в теле update-запросов — перемещение делается через
+  // URL-параметры addParents/removeParents.
+  const metadata = fileId
+    ? { name: BACKUP_FILE_NAME, mimeType: "application/json" }
+    : { name: BACKUP_FILE_NAME, parents: ["appDataFolder"], mimeType: "application/json" };
   const body =
     `--${boundary}\r\n` +
     `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
