@@ -1,6 +1,7 @@
 import Link from "next/link";
 import BottomNav from "@/components/bottom-nav";
 import BackupSection from "@/components/backup-section";
+import CloudSyncSection from "@/components/cloud-sync-section";
 import StorageSection from "@/components/storage-section";
 import XpProfileSection from "@/components/xp-profile-section";
 import PathStatsSection from "@/components/path-stats-section";
@@ -26,6 +27,8 @@ export default function SettingsPage() {
         <PathStatsSection />
 
         <BackupSection />
+
+        <CloudSyncSection />
 
         <StorageSection />
       </div>

@@ -167,7 +167,7 @@ function NavItem({
       aria-current={active ? "page" : undefined}
       onClick={onNavigate}
       className={
-        "flex min-w-[60px] flex-1 flex-col items-center gap-1 rounded-xl px-1 py-2 transition-colors " +
+        "flex min-w-[48px] flex-1 flex-col items-center gap-1 rounded-xl px-1 py-2 transition-colors " +
         (highlighted
           ? "bg-[var(--pill-active)] text-[var(--gold)]"
           : "text-[var(--ink-secondary)] active:text-[var(--ink)]") +

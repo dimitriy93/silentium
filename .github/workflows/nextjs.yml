@@ -79,6 +79,11 @@ jobs:
         # переменной (next.config basePath, ассеты, манифест, service worker).
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          # OAuth Client ID — публичное значение (client secret не нужен
+          # для browser flow). Добавьте секрет NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID
+          # в настройках репозитория, иначе раздел cloud backup покажет
+          # «не настроена».
+          NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_OAUTH_CLIENT_ID }}
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

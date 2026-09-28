@@ -14,7 +14,14 @@ export const metadata: Metadata = {
 };
 
 // viewport-fit=cover — обязателен для env(safe-area-inset-*) на iPhone.
+// userScalable: false — Silentium является PWA с фиксированным мобильным
+// интерфейсом: pinch-to-zoom не должен «плавить» layout; все экраны уже
+// адаптируются к ширине устройства (width=device-width, scale=1).
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
   themeColor: "#0a0f1c",
 };
